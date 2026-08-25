@@ -36,13 +36,22 @@ Why vanfanel:
   commented-out CD blocks. What actually changes is `huc6270.vhd`,
   `huc6260.vhd` and `pce_top.vhd`: the VDC and VCE accuracy fixes.
 
-**Open confirmation.** A build of `vanfanel-base` is measuring whether those VDC
-changes cost ALMs or slack against the baseline in `docs/BASELINE.md`. Its
-fitter has already run well past the baseline's 14 minutes, which is weak
-evidence that the rewritten `huc6270` is harder to place. If it turns out to
-cost meaningful margin, the fallback is to cherry-pick vanfanel's VDC fixes
-individually rather than take the branch wholesale. That does not change the
-recommendation, only the granularity.
+**Confirmed by measurement.** `make compare A=pce B=vanfanel`, same Quartus,
+same settings, same machine:
+
+|  | agg23 | vanfanel | delta |
+| --- | ---: | ---: | ---: |
+| ALMs | 14,779 (80.0%) | 14,700 (79.5%) | **-79** |
+| Registers | 14,735 | 14,720 | -15 |
+| M10K blocks | 225 (73.1%) | 225 (73.1%) | 0 |
+| Worst slack (hold) | +0.103 ns | +0.118 ns | **+0.015 ns** |
+| Setup slack | +2.208 ns | +2.253 ns | +0.045 ns |
+
+Strictly better on every axis: 20 months of accuracy fixes for slightly
+negative ALM cost and slightly more margin. The cherry-pick fallback this
+section used to describe is not needed. The one caveat is that vanfanel's fit
+took 44 minutes against the baseline's 19; repeated runs would say whether that
+is the design or just machine load, and it does not affect the result.
 
 Remotes are configured with pushes disabled on both upstreams. Branches:
 
@@ -226,7 +235,7 @@ HuCards, which the Analogue adapter does support.
 
 | Phase | Deliverable | Done when |
 |---|---|---|
-| **P0** | Confirm the fork. Finish the `vanfanel-base` build, `make compare A=agg23 B=vanfanel`. Then build `cheats` and confirm the SGX saving. | Both reports exist; SGX saving is measured rather than projected. |
+| **P0** | Confirm the fork (**done**, see §0) and the SGX saving. | Fork confirmed 2026-08-25: vanfanel costs -79 ALMs and gains 0.015 ns. SGX build in flight. |
 | **P1** | Reconnect the existing engine. Uncomment the `gg_code` loader shape at `main.sv:556-568`, drive it from a hardcoded constant code. Apply the §5 split-lookup fix at the same time. | A hardcoded code visibly takes effect on hardware. Proves the hook with no file I/O. |
 | **P2** | Cheats data slot + `cheat_loader.sv` + a third `data_loader`. | A `.cht` next to the ROM applies codes. |
 | **P3** | `interact.json` master switch + parsed-count readout, on a free `0x400+` bridge address. Enables come from the file. | Cheats can be turned off without removing the file. |

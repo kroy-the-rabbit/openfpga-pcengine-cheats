@@ -68,3 +68,34 @@ core is pressing against.
   next to the project. Quartus 25.1 instantiates nothing and does not warn, so
   these figures are the core's own logic with no instrumentation in them.
   `make pce NO_SIGNALTAP=1` removes the assignments if that ever changes.
+
+---
+
+## Fork comparison: vanfanel vs agg23
+
+Measured 2026-08-25 with the same Quartus, settings and machine, via
+`make compare A=pce B=vanfanel`. `vanfanel/master` is 19 commits ahead of
+`agg23/master` and 0 behind, carrying MiSTer accuracy fixes dated 2025-03-05
+through 2026-07-09.
+
+| | agg23 `8810ed6` | vanfanel `b29af7f` | delta |
+| --- | ---: | ---: | ---: |
+| ALMs | 14,779 (80.0%) | 14,700 (79.5%) | **-79** |
+| Registers | 14,735 | 14,720 | -15 |
+| Block memory bits | 1,788,320 | 1,788,320 | 0 |
+| M10K blocks | 225 (73.1%) | 225 (73.1%) | 0 |
+| DSP blocks | 17 | 17 | 0 |
+| Setup slack | +2.208 ns | +2.253 ns | +0.045 ns |
+| Worst slack (hold) | +0.103 ns | +0.118 ns | **+0.015 ns** |
+
+Twenty months of upstream accuracy work for slightly fewer ALMs and slightly
+more timing margin. Only three of vanfanel's seven changed files reach this
+build at all: `huc6270.vhd`, `huc6260.vhd` and `pce_top.vhd`. The CD and XE-1AP
+changes are in modules Quartus never synthesises here, and the `main.sv` delta
+is entirely inside commented-out CD blocks.
+
+One unexplained observation: vanfanel's fit took 2,652 s against the baseline's
+1,136 s, on the same machine with the same settings. The result is smaller and
+faster, so this is not a design that got harder to place; repeated runs would
+say whether it is fitter variance or contention. It is recorded here because it
+briefly looked like evidence of a problem and was not.
