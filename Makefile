@@ -9,6 +9,7 @@
 #   make pce SKIP_COMPILE=1     re-report existing outputs (no Quartus run)
 #   make report                 regenerate build/pce/report.txt from existing outputs
 #   make shell                  interactive shell in the Quartus container
+#   make compare A=pce B=vanfanel   resource and timing delta between two builds
 #   make clean                  remove build/
 
 PODMAN  ?= podman
@@ -16,7 +17,7 @@ IMAGE   ?= localhost/pocket-quartus:25.1std
 REV     ?= pce_pocket
 HARNESS := tools/podman
 
-.PHONY: pce report shell clean
+.PHONY: pce report compare shell clean
 
 pce:
 	PODMAN=$(PODMAN) IMAGE=$(IMAGE) REV=$(REV) SEED=$(SEED) BUILD_NAME=$(BUILD_NAME) \
@@ -33,3 +34,6 @@ shell:
 
 clean:
 	rm -rf build
+
+compare:
+	REV=$(REV) $(HARNESS)/compare.sh $(A) $(B)
