@@ -6,7 +6,13 @@ use IEEE.STD_LOGIC_TEXTIO.all;
 
 entity pce_top is
 	generic (
-		LITE : integer := 0
+		LITE : integer := 0;
+		-- SuperGrafx. The second VDC, its 32K VRAM and the VPC that mixes the two
+		-- cost 5,441 ALMs and 68 M10Ks, which is 29% of the Pocket device's logic
+		-- and 22% of its block RAM, for one small library. This is its own generic
+		-- rather than part of LITE because LITE also gates the Game Genie block
+		-- above, which is worth keeping.
+		SGX_EN : integer := 1
 	);
 	port(
 		RESET			: in  std_logic;
@@ -407,7 +413,7 @@ port map (
 CLR_A  <= CLR_A + 1  when rising_edge(CLK);
 CLR_WE <= COLD_RESET when rising_edge(CLK);
 
-generate_SGX: if (LITE = 0) generate begin
+generate_SGX: if (SGX_EN /= 0) generate begin
 
 	VDC1 : entity work.HUC6270
 	port map(
@@ -500,7 +506,7 @@ generate_SGX: if (LITE = 0) generate begin
 
 end generate;
 
-generate_NOSGX: if (LITE /= 0) generate begin
+generate_NOSGX: if (SGX_EN = 0) generate begin
 
 	CPU_VDC0_SEL_N <= CPU_VDC_SEL_N;
 	CPU_VDC1_SEL_N <= '1';

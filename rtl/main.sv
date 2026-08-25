@@ -164,7 +164,7 @@ module pce (
 
   wire [15:0] cdda_sl, cdda_sr, adpcm_s, psg_sl, psg_sr;
 
-  pce_top #(LITE) pce_top (
+  pce_top #(LITE, SGX_EN) pce_top (
       .RESET(reset | cart_download),
       .COLD_RESET(cart_download),
 
@@ -190,7 +190,7 @@ module pce (
       .GG_AVAIL(gg_avail),
 
       .SP64(extra_sprites_enable),
-      .SGX (sgx && !LITE),
+      .SGX (sgx && SGX_EN != 0),
 
       .JOY_OUT(joy_out),
       .JOY_IN (joy_in),
@@ -438,6 +438,9 @@ module pce (
   ////////////////////////////  MEMORY  //////////////////////////////////
 
   localparam LITE = 0;
+  // SuperGrafx off. Frees the second VDC, its VRAM and the VPC: see the SGX_EN
+  // comment in pce_top.vhd. .sgx files still load, they just render as plain PCE.
+  localparam SGX_EN = 0;
 
   wire [21:0] rom_rdaddr;
   wire [ 7:0] rom_sdata;
