@@ -372,6 +372,10 @@ module core_top (
         32'h308: begin
           cd_audio_boost <= bridge_wr_data[0];
         end
+        // ROM loading options
+        32'h400: begin
+          swap_bits <= bridge_wr_data[0];
+        end
         // 32'h200: begin
         //   mb128_enable <= bridge_wr_data[0];
         // end
@@ -489,6 +493,7 @@ module core_top (
   reg ioctl_download = 0;
   reg save_download = 0;
   reg is_sgx = 0;
+  reg swap_bits = 0;
   wire ioctl_wr;
   wire [23:0] ioctl_addr;
   wire [15:0] ioctl_dout;
@@ -514,12 +519,13 @@ module core_top (
   wire ioctl_download_s;
   wire save_download_s;
   wire is_sgx_s;
+  wire swap_bits_s;
 
   synch_3 #(
-      .WIDTH(3)
+      .WIDTH(4)
   ) download_s (
-      {ioctl_download, save_download, is_sgx},
-      {ioctl_download_s, save_download_s, is_sgx_s},
+      {ioctl_download, save_download, is_sgx, swap_bits},
+      {ioctl_download_s, save_download_s, is_sgx_s, swap_bits_s},
       clk_mem_85_91
   );
 
@@ -717,6 +723,7 @@ module core_top (
       .pll_core_locked(pll_core_locked),
 
       .sgx(is_sgx_s),
+      .swap_bits(swap_bits_s),
 
       // Input
       .p1_button_1(cont1_key_s[4]),

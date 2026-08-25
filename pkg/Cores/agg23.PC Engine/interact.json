@@ -120,6 +120,17 @@
         "writeonly": true,
         "defaultval": 0,
         "value": 1
+      },
+      {
+        "name": "Swap ROM Bit Order",
+        "id": 80,
+        "type": "check",
+        "enabled": true,
+        "address": "0x00000400",
+        "persist": true,
+        "writeonly": true,
+        "defaultval": 0,
+        "value": 1
       }
     ],
     "messages": []

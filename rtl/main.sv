@@ -59,6 +59,11 @@ module pce (
     input wire p4_dpad_right,
 
     input wire sgx,
+    // US TurboChips wire D0-D7 in the opposite order to Japanese HuCards, so a
+    // dump taken with the wrong orientation is bit-reversed within each byte.
+    // MiSTer exposes this as an OSD toggle; the Pocket port had the logic but
+    // hardwired its selector to zero. Sampled at load time only.
+    input wire swap_bits,
 
     // Settings
     input wire turbo_tap_enable,
@@ -503,7 +508,7 @@ module pce (
 
   wire romwr_ack;
   reg [23:0] romwr_a;
-  wire [15:0] romwr_d = status[3] ?
+  wire [15:0] romwr_d = swap_bits ?
 		{ ioctl_dout[8], ioctl_dout[9], ioctl_dout[10],ioctl_dout[11],ioctl_dout[12],ioctl_dout[13],ioctl_dout[14],ioctl_dout[15],
 		  ioctl_dout[0], ioctl_dout[1], ioctl_dout[2], ioctl_dout[3], ioctl_dout[4], ioctl_dout[5], ioctl_dout[6], ioctl_dout[7] }
 		: ioctl_dout;
