@@ -145,3 +145,62 @@ project. Landing that here would put this core near 10,900 ALMs, about 59%,
 with roughly 150 M10K blocks still free. That is the comfortable position the
 whole SuperGrafx trade was for: pocket-gbc hit 91% block RAM doing this same
 work and had to fight for it.
+
+---
+
+## The PLL hold path, and why builds need watching
+
+One path decides whether a build is flashable, and it is not in core logic:
+
+    Hold  ic|mp1|mf_pllbase_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk
+
+Its history across every build so far, same Quartus, same machine:
+
+| Build | Change | Hold slack |
+| --- | --- | ---: |
+| `pce` | agg23 stock | +0.103 ns |
+| `vanfanel` | + 20 months of VDC fixes | +0.118 ns |
+| `cheats` | + SGX removed | +0.122 ns |
+| `swapbits` | + a 16-bit mux on ROM download | **-0.025 ns** |
+| `swapbits-s2` | identical RTL, `SEED=2` | +0.103 ns |
+
+The last two rows are the point. **Identical source, 0.128 ns apart, one
+failing and one passing.** So the -0.025 ns was placement, not the mux: a
+16-bit mux on the SDRAM write path during ROM download is in a different clock
+domain from a PLL output counter and cannot plausibly move it.
+
+### Why it swings
+
+The fitter says so itself:
+
+    Fitter Effort : Auto Fit
+    Info (171003): Fitter is performing an Auto Fit compilation, which may
+                   decrease Fitter effort to reduce compilation time
+    Info (16304):  default for this mode is Standard Fit
+
+`AUTO FIT` lowers effort as soon as it believes timing is achievable. On a path
+whose margin is around a tenth of a nanosecond, that judgement is worth
+overriding: `FITTER_EFFORT="STANDARD FIT"` costs compile time and buys
+repeatable closure. The harness sets `OPTIMIZE_HOLD_TIMING "ALL PATHS"`
+alongside it, and patches only the build copy, so the checked-in project file
+stays as upstream wrote it.
+
+### One fix that does *not* apply here
+
+pocket-gbc solved a similar marginal hold path by declaring its audio PLL's two
+outputs asynchronous to each other, because that core's SDC left them in no
+clock group at all. **Do not copy that here.** `target/pocket/core_constraints.sdc`
+already puts all three `mf_pllbase` outputs in a single `-group`, which is
+correct: they are ratio-related outputs of one VCO (42.95 MHz, 85.91 MHz and a
+video clock) and the design genuinely relies on synchronous crossings between
+them, as the `set_multicycle_path` lines just below it show. Splitting them
+into separate groups would false-path real paths and produce a build that
+passes timing analysis and fails on hardware.
+
+### Practical rule
+
+Read `report.txt`, not the exit code. Quartus exits 0 on a design that misses
+timing; `tools/podman/report.sh` is what catches it and leaves a
+`TIMING_FAILED` marker. A build that lands near zero is not evidence that the
+change caused it. Re-fit with another `SEED` first, and treat a change as
+guilty only if it fails across seeds.

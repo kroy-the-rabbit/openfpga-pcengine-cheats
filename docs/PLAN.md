@@ -163,9 +163,12 @@ split the Game Boy work is built around, and it is the single most important
 fact in this plan.
 
 Evidence, gathered 2026-08-25: all 397 files in libretro's
-`NEC - PC Engine - TurboGrafx 16` were listed and the format split counted, and
-a dozen were read in full. Every sampled code address falls inside
-`0x1F0000`-`0x1F1FFF`, the 8KB work RAM at bank `$F8`. None lands in ROM space.
+`NEC - PC Engine - TurboGrafx 16` were parsed and every one of the 1224 codes
+in them read. None lands in ROM space. 1208 sit inside `0x1F0000`-`0x1F1FFF`,
+the 8KB work RAM at bank `$F8`; 13 sit between `0x1F2000` and `0x1F2656`, which
+is inside the 32KB a SuperGrafx carries and outside the 8KB this core will
+keep, so the poker will have to decide whether to ignore them; 3 are not
+addresses this machine has.
 
 So the two mechanisms rank the other way round from GBC:
 
@@ -179,12 +182,25 @@ So the two mechanisms rank the other way round from GBC:
    and it is there if a ROM-patch code ever turns up. Do not spend a phase on
    it, and do not delete it either.
 
-The libretro files come in two shapes, both targeting the same work RAM. 350
-use `cheat0_code = "1f1548:64"`, a 21-bit hex CPU address and a hex byte. 47,
-all named `(Rumbles)`, use `cheat0_address` as a **decimal offset into work
-RAM** plus `cheat0_value`, converting as `0x1F0000 + address`. The parser has
-to read both. Full detail lives in the picker app's
-`docs/PCE-TG16-PLAN.md`.
+The libretro files come in two shapes, both targeting the same work RAM, and a
+file uses one or the other.
+
+**246 files** use `cheat0_code = "1f1548:64"`, a 21-bit hex CPU address and a
+hex byte, with several joined by `+`.
+
+**151 files** leave `cheat0_code` present and **empty**, and put the code in
+`cheat0_address` as a **decimal offset into work RAM** plus `cheat0_value`,
+converting as `0x1F0000 + address`. An earlier draft here said 47 files, all
+named `(Rumbles)`. Both halves were wrong: there are 151 and 104 of them carry
+ordinary game names, so a parser that keys on `_code` being present, or that
+filters on the suffix, silently loses over a third of the corpus.
+
+The parser has to read both, and has to skip the rows that cannot become a
+poke: 70 with `cheat_type = 0`, which watch an address to fire a rumble and
+write nothing, 2 bit-level rows, 1 with no value, and 3 with an impossible
+address. It also has to expand `repeat_count`, which one row uses for real.
+Full detail, and a decoder already written and tested against every file, lives
+in the picker app's `docs/PCE-TG16-PLAN.md` and `cheatgui/pce.py`.
 
 Enable state comes **from the cheat file**, via a `cheatN_enable` key, not from
 menu checkboxes. GBC built per-cheat interact checkboxes and then removed them:
