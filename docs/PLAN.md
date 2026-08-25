@@ -137,9 +137,11 @@ All six files come from `~/Desktop/repos/pocket-gbc/src/gb/`.
   `0x0, 0x4, 0x8, 0x50, 0x100-0x10C, 0x200-0x208, 0x300-0x308`. **`0x400+` is
   free.** Note this core does *not* use the `0xF0000000` scheme the GBC core
   does, so GBC's addresses do not transfer.
-* **Menu.** `interact.json` has **12 entries and APF allows 16**, so there are
-  exactly 4 free. GBC needs 2 ("Cheats enabled", "Show cheats"). Fits, with room
-  for a parsed-count readout.
+* **Menu.** `interact.json` holds **10 variables and APF allows 16**, so 6 are
+  free. An earlier draft said 12 and 4; that counted the nested option labels
+  inside the audio dropdowns, which are not menu entries. GBC needs 2 ("Cheats
+  enabled", "Show cheats"), and "Swap ROM Bit Order" now takes a third. Fits,
+  with room for a parsed-count readout.
 * **RAM poking.** `pce_top.vhd:625`, work RAM is a `dpram` whose **port B is used
   only by the cold-reset clear** (`CLR_A` / `CLR_WE`). That is the same shape as
   the GB WRAM port B the poker already borrows, so the technique transfers
