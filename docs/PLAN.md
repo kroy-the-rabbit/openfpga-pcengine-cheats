@@ -234,7 +234,32 @@ P4 is useful without it.
 
 ---
 
-## 7. Explicitly out of scope: physical HuCards
+## 7. Explicitly out of scope
+
+### 7a. CD-ROM² / disc images
+
+Decided 2026-08-25: not now.
+
+The RTL is all present and compiled every build (`rtl/pce/cd/`: `cd.vhd`,
+`SCSI.vhd`, `SCSI_FIFO.vhd`, `CDDA_FIFO.vhd`, `MSM5205.vhd`) and produces zero
+logic, because it is disabled in three places: `pce_top.vhd:636` passes the
+literal `EN => '0'`, `main.sv:273` has `reg cd_en = 0` with every assignment
+commented out, and roughly 85 further CD lines in `main.sv` are commented too.
+MiSTer passes `EN => '1'` at that same spot; agg23 changed it when porting.
+
+The reason it is a project rather than a toggle: MiSTer's CD block expects an
+HPS running Linux to parse the cue sheet, seek the image and feed it sectors.
+The Pocket has no HPS. `Mazamars312/openfpga-pcengine-cd` is the one core that
+closed that gap, and its manifest shows the cost: `deferload` cue and bin
+slots, APF `version_required 2.3` against our `1.1`, a System Card BIOS the
+user must supply, and a 64KB `pce_mpu_bios.bin` for a soft MPU that stands in
+for the HPS.
+
+If CD becomes the priority, the cheaper direction is almost certainly to add
+cheats to Mazamars312's core rather than add CD to this one. The CD subsystem
+is the expensive half and it already exists there.
+
+### 7b. Physical HuCards
 
 Analogue does ship a TurboGrafx-16 adapter, and openFPGA cores genuinely can
 read physical cartridges: `~/Desktop/repos/pocket-gbc` does exactly that, with
