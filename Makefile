@@ -13,6 +13,12 @@
 #   make clean                  remove build/
 
 PODMAN  ?= podman
+# Repeatable timing closure. AUTO FIT, which the qsf asks for, lowers effort as
+# soon as it believes timing is achievable, and on this design the worst hold
+# path has about a tenth of a nanosecond of margin. At the same seed, AUTO FIT
+# landed it at -0.025 ns and STANDARD FIT at +0.109 ns. Override with an empty
+# value to build the way upstream does. See docs/BASELINE.md.
+FITTER_EFFORT ?= STANDARD FIT
 IMAGE   ?= localhost/pocket-quartus:25.1std
 REV     ?= pce_pocket
 HARNESS := tools/podman

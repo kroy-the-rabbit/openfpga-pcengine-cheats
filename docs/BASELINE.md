@@ -163,6 +163,7 @@ Its history across every build so far, same Quartus, same machine:
 | `cheats` | + SGX removed | +0.122 ns |
 | `swapbits` | + a 16-bit mux on ROM download | **-0.025 ns** |
 | `swapbits-s2` | identical RTL, `SEED=2` | +0.103 ns |
+| `swapbits-std` | identical RTL, seed 1, **`STANDARD FIT`** | **+0.109 ns** |
 
 The last two rows are the point. **Identical source, 0.128 ns apart, one
 failing and one passing.** So the -0.025 ns was placement, not the mux: a
@@ -180,10 +181,22 @@ The fitter says so itself:
 
 `AUTO FIT` lowers effort as soon as it believes timing is achievable. On a path
 whose margin is around a tenth of a nanosecond, that judgement is worth
-overriding: `FITTER_EFFORT="STANDARD FIT"` costs compile time and buys
-repeatable closure. The harness sets `OPTIMIZE_HOLD_TIMING "ALL PATHS"`
-alongside it, and patches only the build copy, so the checked-in project file
-stays as upstream wrote it.
+overriding.
+
+The controlled comparison is the first and last rows of the table: **same RTL,
+same seed, only the effort setting differs, and the build goes from -0.025 ns
+to +0.109 ns.** It was also *faster*, 957 s against 1,236 s, so AUTO FIT was
+not even buying compile time here.
+
+So `FITTER_EFFORT="STANDARD FIT"` is now the harness default, with
+`OPTIMIZE_HOLD_TIMING "ALL PATHS"` alongside it. Both are applied to the build
+copy only, so the checked-in project file stays as upstream wrote it, and
+`make pce FITTER_EFFORT=` builds the way upstream does.
+
+**What this does not do** is make the path comfortable. STANDARD FIT stops the
+fitter giving up early and landing negative; it does not lift the margin out of
+the 0.10-0.12 ns band every passing build sits in. This path stays the thing to
+check on every build.
 
 ### One fix that does *not* apply here
 
