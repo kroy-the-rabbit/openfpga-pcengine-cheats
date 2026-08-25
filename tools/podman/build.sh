@@ -13,7 +13,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
-BDIR="$REPO/build/pce"
+BDIR="$REPO/build/${BUILD_NAME:-pce}"
 WORK="$BDIR/work"
 
 PODMAN=${PODMAN:-podman}

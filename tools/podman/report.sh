@@ -9,7 +9,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
-BDIR="$REPO/build/pce"
+BDIR="$REPO/build/${BUILD_NAME:-pce}"
 REV=${REV:-pce_pocket}
 OUT="$BDIR/work/projects/output_files"
 
