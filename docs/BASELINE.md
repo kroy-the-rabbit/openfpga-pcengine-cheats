@@ -99,3 +99,49 @@ One unexplained observation: vanfanel's fit took 2,652 s against the baseline's
 faster, so this is not a design that got harder to place; repeated runs would
 say whether it is fitter variance or contention. It is recorded here because it
 briefly looked like evidence of a problem and was not.
+
+---
+
+## SuperGrafx removed: the working configuration
+
+Branch `cheats` (`SGX_EN = 0`, commit `85f58ba`) against the vanfanel control,
+measured 2026-08-25 via `make compare A=vanfanel B=cheats`.
+
+| | vanfanel | cheats (no SGX) | delta |
+| --- | ---: | ---: | ---: |
+| ALMs | 14,700 (79.5%) | **9,204 (49.8%)** | -5,496 |
+| Registers | 14,720 | 10,096 | -4,624 |
+| Block memory bits | 1,788,320 (56.7%) | 1,054,224 (33.4%) | -734,096 |
+| M10K blocks | 225 (73.1%) | **134 (43.5%)** | -91 |
+| Setup slack | +2.253 ns | +1.831 ns | -0.422 ns |
+| Worst slack (hold) | +0.118 ns | +0.122 ns | +0.004 ns |
+
+9,276 ALMs and 174 M10K blocks free, timing met in every corner.
+
+### The block RAM saving came in larger than predicted, and why
+
+The projection was 68 M10Ks: `VDC1`'s 4 plus `VRAM1`'s 64. The measurement is
+91. The extra 23 are the work RAM shrinking on its own:
+
+| Entity | vanfanel | cheats |
+| --- | ---: | ---: |
+| `dpram:RAM` | 32 M10K, 262,144 bits | **8 M10K, 65,536 bits** |
+
+`pce_top.vhd:625` declares work RAM as `dpram (15,8)`, 32KB, because SuperGrafx
+needs it. With `SGX = '0'`, `pce_top.vhd:639` ties `RAM_A(14 downto 13)` to
+`"00"`, so the top two address bits are constant and Quartus infers an 8KB
+memory without being asked. **The manual narrowing to `(13,8)` that the plan
+held in reserve is unnecessary.**
+
+One counter-movement worth noting: `HUC6270:VDC0` grew from 5,357 to 5,606 ALMs
+(+249) as the only remaining VDC. It is dwarfed by what came out, but it is a
+reminder that removing one of two identical instances does not simply halve the
+pair.
+
+### Headroom for the cheat work
+
+The GB/GBC cheat stack, overlay included, measured 1,655 ALMs in its own
+project. Landing that here would put this core near 10,900 ALMs, about 59%,
+with roughly 150 M10K blocks still free. That is the comfortable position the
+whole SuperGrafx trade was for: pocket-gbc hit 91% block RAM doing this same
+work and had to fight for it.

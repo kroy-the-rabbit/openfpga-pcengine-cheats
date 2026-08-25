@@ -235,7 +235,7 @@ HuCards, which the Analogue adapter does support.
 
 | Phase | Deliverable | Done when |
 |---|---|---|
-| **P0** | Confirm the fork (**done**, see §0) and the SGX saving. | Fork confirmed 2026-08-25: vanfanel costs -79 ALMs and gains 0.015 ns. SGX build in flight. |
+| **P0** | Confirm the fork and the SGX saving. | **Done 2026-08-25.** vanfanel costs -79 ALMs and gains 0.015 ns. SGX removal lands the core at 9,204 ALMs (49.8%) and 134 M10K (43.5%), timing met. See `docs/BASELINE.md`. |
 | **P1** | Reconnect the existing engine. Uncomment the `gg_code` loader shape at `main.sv:556-568`, drive it from a hardcoded constant code. Apply the §5 split-lookup fix at the same time. | A hardcoded code visibly takes effect on hardware. Proves the hook with no file I/O. |
 | **P2** | Cheats data slot + `cheat_loader.sv` + a third `data_loader`. | A `.cht` next to the ROM applies codes. |
 | **P3** | `interact.json` master switch + parsed-count readout, on a free `0x400+` bridge address. Enables come from the file. | Cheats can be turned off without removing the file. |
@@ -262,5 +262,7 @@ rather than iterating one line at a time.
 3. Is the 8KB work RAM the only poke target worth having, or do games keep
    state in the 32KB PRAM (`pce_top.vhd:609`, Populous only) often enough to
    matter?
-4. Does `SGX_EN = 0` want to shrink work RAM to `(13,8)` in the same commit, or
-   is that better held until P4 shows whether M10Ks are tight?
+4. ~~Does `SGX_EN = 0` want to shrink work RAM to `(13,8)`?~~ **Answered
+   2026-08-25: no.** Quartus infers the 8KB memory by itself, because
+   `RAM_A(14 downto 13)` is tied to `"00"` when `SGX = '0'`. `dpram:RAM` fell
+   from 32 M10K to 8 with no source change. See `docs/BASELINE.md`.
