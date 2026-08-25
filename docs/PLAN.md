@@ -83,7 +83,10 @@ nothing ever assigns `gg_code`, so Quartus constant-folds the whole comparator
 away. The engine is gated on `generate_CHEAT: if (LITE = 0)`, which is the
 default, so it is already "in" the build in name.
 
-Consequence: P1 below is uncommenting and rewiring, not re-porting.
+Consequence: reconnecting it would be uncommenting rather than re-porting. §4
+explains why that turned out not to be worth doing: nothing in the PC Engine
+cheat corpus patches ROM, so the engine stays unwired and free, and the work
+goes into the poker instead.
 
 ---
 
@@ -152,18 +155,36 @@ All six files come from `~/Desktop/repos/pocket-gbc/src/gb/`.
 
 ---
 
-## 4. Cheat semantics
+## 4. Cheat semantics: the opposite of GBC
 
-Two mechanisms, same split as GBC:
+**Every published PC Engine cheat is a RAM poke. None is a ROM patch.** There
+is no Game Genie for this machine in the libretro database. That inverts the
+split the Game Boy work is built around, and it is the single most important
+fact in this plan.
 
-1. **ROM read override** (`CODES`). Combinational compare of the CPU address
-   against stored codes, forcing `genie_data` onto `CPU_DI`. Already wired.
-   Correct for HuCard ROM patches.
-2. **RAM poke** (`cheat_poker.sv`). Writes values into work RAM once per frame
-   through dpram port B. Needed for anything that patches live state, which a
-   read override cannot reach: DMA copies, cached values and read-modify-write
-   sequences all diverge from what the code was written against. Use PCE vblank
-   as the trigger, the equivalent of GBC's `vblank_irq`.
+Evidence, gathered 2026-08-25: all 397 files in libretro's
+`NEC - PC Engine - TurboGrafx 16` were listed and the format split counted, and
+a dozen were read in full. Every sampled code address falls inside
+`0x1F0000`-`0x1F1FFF`, the 8KB work RAM at bank `$F8`. None lands in ROM space.
+
+So the two mechanisms rank the other way round from GBC:
+
+1. **RAM poke** (`cheat_poker.sv`) is **the feature**. Writes values into work
+   RAM once per frame through dpram port B, triggered on PCE vblank, the
+   equivalent of GBC's `vblank_irq`. Everything the corpus contains needs this
+   and only this.
+2. **ROM read override** (`CODES`) is **already wired and currently free**.
+   Because nothing drives `gg_code`, Quartus folds the entire comparator away
+   and it costs 0 ALMs. Leave it exactly as it is: unwired it costs nothing,
+   and it is there if a ROM-patch code ever turns up. Do not spend a phase on
+   it, and do not delete it either.
+
+The libretro files come in two shapes, both targeting the same work RAM. 350
+use `cheat0_code = "1f1548:64"`, a 21-bit hex CPU address and a hex byte. 47,
+all named `(Rumbles)`, use `cheat0_address` as a **decimal offset into work
+RAM** plus `cheat0_value`, converting as `0x1F0000 + address`. The parser has
+to read both. Full detail lives in the picker app's
+`docs/PCE-TG16-PLAN.md`.
 
 Enable state comes **from the cheat file**, via a `cheatN_enable` key, not from
 menu checkboxes. GBC built per-cheat interact checkboxes and then removed them:
@@ -182,10 +203,13 @@ lookup so the 32-way search runs off the registered address and `cpu_di` feeds
 only one 8-bit compare. The two forms are equivalent because `CODES` keeps at
 most one entry per address.
 
-**Apply this from the first build, not after measuring.** This core's instance
-is `ADDR_WIDTH => 21` against GBC's 16, so the comparator is wider and the
-baseline hold margin here is already only 0.103 ns. `tools/podman/report.sh`
-gates on slack precisely because Quartus does not.
+Since §4 cuts the read override, that specific comparator is not being built
+here. The transferable lesson still is: **any per-code lookup placed on a
+late-arriving data path will cost nanoseconds**, and the poker has a lookup of
+its own. Keep its table search off registered addresses rather than off data,
+and check the report rather than trusting the exit code, because
+`tools/podman/report.sh` gates on slack precisely for the reason above:
+Quartus does not.
 
 ---
 
@@ -238,10 +262,11 @@ HuCards, which the Analogue adapter does support.
 | Phase | Deliverable | Done when |
 |---|---|---|
 | **P0** | Confirm the fork and the SGX saving. | **Done 2026-08-25.** vanfanel costs -79 ALMs and gains 0.015 ns. SGX removal lands the core at 9,204 ALMs (49.8%) and 134 M10K (43.5%), timing met. See `docs/BASELINE.md`. |
-| **P1** | Reconnect the existing engine. Uncomment the `gg_code` loader shape at `main.sv:556-568`, drive it from a hardcoded constant code. Apply the §5 split-lookup fix at the same time. | A hardcoded code visibly takes effect on hardware. Proves the hook with no file I/O. |
-| **P2** | Cheats data slot + `cheat_loader.sv` + a third `data_loader`. | A `.cht` next to the ROM applies codes. |
-| **P3** | `interact.json` master switch + parsed-count readout, on a free `0x400+` bridge address. Enables come from the file. | Cheats can be turned off without removing the file. |
-| **P4** | `cheat_poker.sv` against work RAM port B, arbitrated with `COLD_RESET`. | A RAM-poke code works where a read override does not. |
+| **P0.5** | `Swap ROM Bit Order` toggle for bit-reversed TurboChip dumps. | **Done 2026-08-25**, commit `66618f0`. Build verifying. |
+| **P1** | **The poker, not the read override.** `cheat_poker.sv` writing work RAM through dpram port B at vblank, arbitrated with `COLD_RESET`, driven by one hardcoded address/value. | A hardcoded poke visibly takes effect on hardware. Proves the mechanism the whole corpus needs, with no file I/O. |
+| **P2** | Cheats data slot + `cheat_loader.sv` + a third `data_loader`. Parser reads **both** libretro forms (§4). | A `.cht` next to the ROM applies codes. |
+| **P3** | `interact.json` master switch + parsed-count readout. Bridge `0x404+`; `0x400` is now the bit-order toggle. Enables come from the file. | Cheats can be turned off without removing the file. |
+| **P4** | ~~Reconnect the Game Genie read override.~~ **Cut.** Nothing in the corpus needs it and unwired it costs 0 ALMs. Revisit only if a ROM-patch code appears. | n/a |
 | **P5 (stretch)** | `cheat_osd.sv` + font + titles, with §6 resolved. | The enabled list is readable on hardware across at least two PCE video modes. |
 | **P6** | README, sample `.cht`, upstream anything that belongs upstream. | — |
 
@@ -253,14 +278,14 @@ rather than iterating one line at a time.
 
 ## 9. Open questions
 
-1. What cheat-code formats exist in the wild for PC Engine, and does the
-   libretro `.cht` database cover it well enough to be the import path? GBC had
-   2,456 files to test the parser against; the PCE corpus needs finding before
-   P2 fixes a format.
-2. Does the `CODES` read override even fire for HuCard reads here? The PCE
-   fetches through `ROM_RD`/`ROM_A` out to SDRAM, so confirm `GENIE_DI` sits on
-   the path the CPU actually reads, not a path the SDRAM controller bypasses.
-   This is the single biggest unknown and should be answered in P1.
+1. ~~What cheat-code formats exist for PC Engine?~~ **Answered 2026-08-25**,
+   see §4: two forms, 397 files, all RAM pokes. Remaining part: are there
+   ROM-patch codes outside the libretro database? If not, §4 item 2 stays cut
+   permanently.
+2. ~~Does the `CODES` read override fire for HuCard reads here?~~ **Moot for
+   now.** §4 found the corpus needs no ROM patching, so the override stays
+   unwired and free. The question only matters if open item 1 turns up
+   ROM-patch codes in the wild.
 3. Is the 8KB work RAM the only poke target worth having, or do games keep
    state in the 32KB PRAM (`pce_top.vhd:609`, Populous only) often enough to
    matter?
