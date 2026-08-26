@@ -1,0 +1,24 @@
+Core by Gregory Estrade, srg320, and greyrogue. Pocket port by agg23. Accuracy
+fixes tracking MiSTer by vanfanel. Cheat support by kroy.
+
+PC Engine (PCE), known as TurboGrafx-16 in the United States, was created by NEC
+and was the first 4th generation console to reach the market. Therefore, even
+though it came out in the late 80s, it has significantly better graphics than
+8-bit systems that were being sold at the time, such as the NES.
+
+This is a fork that adds cheat support. Every published PC Engine cheat is a
+work RAM poke, so cheats are applied by writing values into memory once per
+frame rather than by patching ROM reads. Turn them on with "Cheats Enabled" in
+the core menu.
+
+Differences from the upstream agg23 port:
+
+  - Cheats.
+  - SuperGrafx is removed to make room for them. .sgx files still load, but
+    they render as plain PC Engine and will not look right.
+  - "Swap ROM Bit Order" for US TurboChip dumps taken bit-reversed.
+
+Loads standard PC Engine and TurboGrafx ROMs from the SD card. CD-ROM is not
+supported and is not planned here; use Mazamars312's core for that.
+
+Report issues with this build to kroy, not to agg23 or vanfanel.

@@ -283,7 +283,7 @@ read physical cartridges: `~/Desktop/repos/pocket-gbc` does exactly that, with
 `core_top.sv:1008-1026`.
 
 This core has it disabled two ways: `"cartridge_adapter": -1` in
-`pkg/Cores/agg23.PC Engine/core.json`, and every `cart_tran_*` pin tied off at
+`pkg/Cores/kroy.PC Engine/core.json`, and every `cart_tran_*` pin tied off at
 `target/pocket/core_top.v:237-249` under the comment "cart is unused".
 
 Leaving it that way, for one reason beyond scope discipline: the GB core spends
@@ -304,12 +304,12 @@ HuCards, which the Analogue adapter does support.
 |---|---|---|
 | **P0** | Confirm the fork and the SGX saving. | **Done 2026-08-25.** vanfanel costs -79 ALMs and gains 0.015 ns. SGX removal lands the core at 9,204 ALMs (49.8%) and 134 M10K (43.5%), timing met. See `docs/BASELINE.md`. |
 | **P0.5** | `Swap ROM Bit Order` toggle for bit-reversed TurboChip dumps. | **Done 2026-08-25**, commit `66618f0`. Build verifying. |
-| **P1** | **The poker, not the read override.** `cheat_poker.sv` writing work RAM through dpram port B at vblank, arbitrated with `COLD_RESET`, driven by one hardcoded address/value. | A hardcoded poke visibly takes effect on hardware. Proves the mechanism the whole corpus needs, with no file I/O. |
+| **P1** | **The poker, not the read override.** `cheat_poker.sv` writing work RAM through dpram port B at vblank, arbitrated with `COLD_RESET`, driven by one hardcoded address/value. | **Done 2026-08-26, verified on hardware.** R-Type "Auto Fire" (`1f016f:80`) applies through the full poker path on a real Pocket. 8,950 ALMs (48.4%), 134 M10K, timing met. `make dist` packages a flashable core. The first hardware test failed on a badly chosen cheat, not the mechanism: see `docs/CHEATS.md`. |
 | **P2** | Cheats data slot + `cheat_loader.sv` + a third `data_loader`. Parser reads **both** libretro forms (§4). | A `.cht` next to the ROM applies codes. |
-| **P3** | `interact.json` master switch + parsed-count readout. Bridge `0x404+`; `0x400` is now the bit-order toggle. Enables come from the file. | Cheats can be turned off without removing the file. |
+| **P3** | `interact.json` master switch + parsed-count readout. Bridge `0x404+`; `0x400` is now the bit-order toggle. Enables come from the file. | **Half done in P1**: the master switch is built, at `0x404`, id 81. What is left is the parsed-count readout. |
 | **P4** | ~~Reconnect the Game Genie read override.~~ **Cut.** Nothing in the corpus needs it and unwired it costs 0 ALMs. Revisit only if a ROM-patch code appears. | n/a |
 | **P5 (stretch)** | `cheat_osd.sv` + font + titles, with §6 resolved. | The enabled list is readable on hardware across at least two PCE video modes. |
-| **P6** | README, sample `.cht`, upstream anything that belongs upstream. | — |
+| **P6** | README, sample `.cht`, upstream anything that belongs upstream. **Also strip the two diagnostic entries** (`DEBUG Wipe Work RAM`, `Test Cheat`) from `interact.json`; the RTL behind them is parameterised off and can stay. | — |
 
 Every phase after P0 is one commit with a hardware smoke test and a recorded
 `report.txt`. Builds are ~19 minutes in `tools/podman/`, so batch RTL changes

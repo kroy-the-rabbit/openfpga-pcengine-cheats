@@ -32,6 +32,11 @@ entity pce_top is
 		BRM_DO 		: in  std_logic_vector(7 downto 0);
 		BRM_WE 		: out std_logic;
 
+		-- Cheat poker, writing work RAM through port B of the RAM below.
+		POKE_A		: in  std_logic_vector(12 downto 0) := (others => '0');
+		POKE_D		: in  std_logic_vector(7 downto 0) := (others => '0');
+		POKE_WE		: in  std_logic := '0';
+
 		GG_EN			: in  std_logic;
 		GG_CODE		: in  std_logic_vector(128 downto 0);
 		GG_RESET		: in  std_logic;
@@ -202,6 +207,9 @@ signal VRAM1_DO	: std_logic_vector(15 downto 0);
 signal VRAM1_WE	: std_logic;
 signal CLR_A	   : std_logic_vector(14 downto 0);
 signal CLR_WE		: std_logic;
+signal RAM_B_A		: std_logic_vector(14 downto 0);
+signal RAM_B_D		: std_logic_vector(7 downto 0);
+signal RAM_B_WE	: std_logic;
 signal VDC0_BORDER: std_logic;
 signal VDC0_GRID	: std_logic_vector(1 downto 0);
 signal CPU_PRE_RD	: std_logic;
@@ -630,10 +638,21 @@ port map (
 	wren_a	=> CPU_CE and not CPU_RAM_SEL_N and not CPU_WR_N,
 	q_a		=> RAM_DO,
 
-	address_b=> CLR_A,
-	data_b	=> (others => '0'),
-	wren_b	=> CLR_WE
+	address_b=> RAM_B_A,
+	data_b	=> RAM_B_D,
+	wren_b	=> RAM_B_WE
 );
+
+-- Port B of work RAM belongs to the cold-reset clear, and the cheat poker
+-- borrows it the rest of the time. The clear always wins: it runs once per
+-- load, the poker runs once per frame, and a poke the clear swallows is
+-- reissued at the next vblank. Only the low 13 bits of the poker's address are
+-- carried, which is the 8KB at bank $F8 the CPU can actually reach here; that
+-- also leaves the upper 24KB of this 32KB block write-only and unread, which is
+-- what lets Quartus infer 8 M10Ks for it instead of 32 when SGX_EN = 0.
+RAM_B_A  <= CLR_A when CLR_WE = '1' else "00" & POKE_A;
+RAM_B_D  <= (others => '0') when CLR_WE = '1' else POKE_D;
+RAM_B_WE <= CLR_WE or POKE_WE;
 
 RAM_A(12 downto 0)  <= CPU_A(12 downto 0);
 RAM_A(14 downto 13) <= CPU_A(14 downto 13) when SGX = '1' else "00";

@@ -75,6 +75,14 @@ module pce (
     input wire extra_sprites_enable,
     input wire raw_rgb_enable,
 
+    // Master cheat switch. The poker is idle with this clear, so a build with
+    // cheats present still boots exactly like one without.
+    input wire cheats_enabled,
+    // Diagnostic: sweeps work RAM with a constant. See cheat_poker.sv.
+    input wire debug_wipe,
+    // Test-cheat selector. See the table in cheat_poker.sv.
+    input wire [3:0] cheat_sel,
+
     input wire mb128_enable,
 
     input wire cd_audio_boost,
@@ -169,6 +177,10 @@ module pce (
 
   wire [15:0] cdda_sl, cdda_sr, adpcm_s, psg_sl, psg_sr;
 
+  wire        poke_wr;
+  wire [12:0] poke_addr;
+  wire  [7:0] poke_data;
+
   pce_top #(LITE, SGX_EN) pce_top (
       .RESET(reset | cart_download),
       .COLD_RESET(cart_download),
@@ -188,6 +200,10 @@ module pce (
       .BRM_DO(bram_q),
       .BRM_DI(bram_data),
       .BRM_WE(bram_wr),
+
+      .POKE_A(poke_addr),
+      .POKE_D(poke_data),
+      .POKE_WE(poke_wr),
 
       .GG_EN(status[5]),
       .GG_CODE(gg_code),
@@ -255,6 +271,39 @@ module pce (
       .VIDEO_VBL(vbl),
 
       .BORDER_OUT(border)
+  );
+
+  // Cheats. Every published PC Engine code is a work RAM poke, so this is the
+  // whole cheat path rather than a companion to the read override. P1 seeds one
+  // code from parameters and leaves the load port idle; P2 adds cheat_loader
+  // and drops SEED_EN.
+  //
+  // The test cheat is chosen at runtime from the menu rather than compiled in,
+  // so trying another one does not cost a 15 minute rebuild.
+  cheat_poker #(
+      .SEED_EN(1),
+      .DEBUG_WIPE(1),
+      .WIPE_DATA(8'h00)
+  ) cheat_poker (
+      .clk       (clk_sys_42_95),
+      .reset     (reset | cart_download),
+      .enable    (cheats_enabled),
+      .vblank    (vbl),
+      .blocked   (cart_download),
+      .wipe      (debug_wipe),
+      .sel       (cheat_sel),
+
+      .code_clear(1'b0),
+      .code_wr   (1'b0),
+      .code_index(5'd0),
+      .code_addr (13'd0),
+      .code_data (8'd0),
+      .code_live (1'b0),
+      .code_count(),
+
+      .poke_wr  (poke_wr),
+      .poke_addr(poke_addr),
+      .poke_data(poke_data)
   );
 
   // CD communication

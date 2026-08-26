@@ -217,3 +217,94 @@ timing; `tools/podman/report.sh` is what catches it and leaves a
 `TIMING_FAILED` marker. A build that lands near zero is not evidence that the
 change caused it. Re-fit with another `SEED` first, and treat a change as
 guilty only if it fails across seeds.
+
+---
+
+## P1: the cheat poker
+
+`make pce BUILD_NAME=poker`, STANDARD FIT, seed 1. Delta against `swapbits-std`,
+which is the same tree without the poker:
+
+| | swapbits-std | poker | delta |
+| --- | ---: | ---: | ---: |
+| ALMs | 9,209 (49.8%) | 9,238 (50.0%) | **+29** |
+| Registers | 10,097 | 10,086 | -11 |
+| Block memory bits | 1,054,224 | 1,054,242 | +18 |
+| M10K blocks | 134 (43.5%) | 135 (43.8%) | **+1** |
+| Worst slack (hold) | +0.109 ns | **+0.093 ns** | -0.016 ns |
+| Setup | +2.253 ns | +2.393 ns | +0.140 ns |
+
+`cheat_poker` itself is **11 ALMs**, 21 combinational ALUTs and 15 registers.
+The other 18 ALMs are the port B mux in `pce_top`, the `0x404` bridge register
+and the widened settings synchroniser. Timing met on every analysis type.
+
+Two things worth recording, because both were predicted wrong first.
+
+**The work RAM shrink survived.** Muxing port B between the cold-reset clear and
+the poker could have made the upper 24KB of that 32KB block look reachable and
+cost back the 24 M10Ks `SGX_EN = 0` freed. It did not: the fit log still shows
+`Synthesized away node ... dpram:RAM ... ram_block1a` 24 times. Carrying only 13
+poke address bits is what preserves it, and that is why `POKE_A` is 13 bits wide
+rather than 15.
+
+**The +1 M10K is a stub, not the table.** Quartus infers the code table as a
+real memory (`Inferred altsyncram megafunction ... cheat_poker|tbl_rtl_0`)
+rather than folding it into constants, but then trims it: with `SEED_EN = 1` and
+one seeded code the scan never leaves index 0, so it reports `Removed 4 MSB VCC
+or GND address nodes` and 18 block memory bits survive of the 704 a full 32-entry
+table needs. It still occupies a whole M10K. P2 will fill the table without
+adding another block, so this +1 is the table's entire block cost, paid early.
+
+**Hold at +0.093 ns** is the lowest passing value recorded on this design, just
+under the 0.10-0.12 ns band the earlier builds sat in. It is the same
+`general[1].gpll ... divclk` path, and it is positive on every corner, so this
+is a pass. Whether the poker actually moved it or this is more of the placement
+variance documented above is not established by one build; the previous section
+is the reason not to assume the former.
+
+---
+
+## P1 verified on hardware, and what the build numbers mean now
+
+`make pce BUILD_NAME=diag`. This is the build that was tested on a Pocket and
+found working.
+
+| | swapbits-std | poker | diag |
+| --- | ---: | ---: | ---: |
+| ALMs | 9,209 (49.8%) | 9,238 (50.0%) | **8,950 (48.4%)** |
+| Registers | 10,097 | 10,086 | 10,100 |
+| M10K | 134 (43.5%) | 135 (43.8%) | 134 (43.5%) |
+| Worst hold | +0.109 ns | +0.093 ns | **+0.103 ns** |
+
+`diag` is 288 ALMs **smaller** than `poker` despite carrying more logic, and
+259 smaller than the baseline with no poker at all. That is not logic going
+missing. Two things account for it, and both were checked rather than assumed:
+
+1. The code table lost its only writer when the runtime selector replaced the
+   compiled-in seed, so it and its surrounding logic went away. That is the
+   M10K.
+2. The rest is ALM packing variance, spread evenly over modules nobody touched:
+   `HUC6270:VDC0` 5,620.9 to 5,375.3, `HUC6280:CPU` 1,665.6 to 1,602.0. Every
+   block shrank a little, which is the signature of denser packing rather than
+   deletion. `poker` was the loosely packed outlier, not `diag`.
+
+`cheat_poker` itself is 23 ALMs in `diag`, up from 11, the difference being the
+selector table and the wipe sweeper.
+
+### The lesson that cost a build
+
+The first hardware test failed and the mechanism was not why. The compiled-in
+cheat was a life counter, which a game need not repaint until it changes, so a
+working poke had nothing to show for itself. Two changes came out of it and
+both are worth keeping:
+
+* **A write-path diagnostic that bypasses everything clever.** `DEBUG_WIPE`
+  sweeps work RAM through the same port B path, ignoring the vblank edge, the
+  table and the FSM. It answers "does a write reach memory at all" in one
+  toggle, which is the question that was actually in doubt.
+* **Runtime cheat selection.** Compiling a test cheat in as a parameter meant
+  every hypothesis cost a 15 minute build. The `Test Cheat` dropdown makes it a
+  menu change.
+
+Neither is a shipping feature; P6 removes both from `interact.json`. The RTL
+stays, parameterised off, costing nothing.

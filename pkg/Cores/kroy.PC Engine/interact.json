@@ -131,6 +131,84 @@
         "writeonly": true,
         "defaultval": 0,
         "value": 1
+      },
+      {
+        "name": "Cheats Enabled",
+        "id": 81,
+        "type": "check",
+        "enabled": true,
+        "address": "0x00000404",
+        "persist": true,
+        "writeonly": true,
+        "defaultval": 0,
+        "value": 1
+      },
+      {
+        "name": "DEBUG Wipe Work RAM",
+        "id": 82,
+        "type": "check",
+        "enabled": true,
+        "address": "0x00000408",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 0,
+        "value": 1
+      },
+      {
+        "name": "Test Cheat",
+        "id": 83,
+        "type": "list",
+        "enabled": true,
+        "address": "0x0000040C",
+        "persist": true,
+        "writeonly": true,
+        "defaultval": 0,
+        "options": [
+          {
+            "name": "Off",
+            "value": 0
+          },
+          {
+            "name": "SoldierBlade MaxWeapon",
+            "value": 1
+          },
+          {
+            "name": "SoldierBlade SpecialBar",
+            "value": 2
+          },
+          {
+            "name": "R-Type AutoFire",
+            "value": 3
+          },
+          {
+            "name": "BlazingLazers Bombs",
+            "value": 4
+          },
+          {
+            "name": "Neutopia2 Energy",
+            "value": 5
+          },
+          {
+            "name": "R-Type Lives",
+            "value": 6
+          },
+          {
+            "name": "BlazingLazers Lives",
+            "value": 7
+          },
+          {
+            "name": "SuperStarSoldier Lives",
+            "value": 8
+          },
+          {
+            "name": "Bomberman Lives",
+            "value": 9
+          },
+          {
+            "name": "Bonk1 Lives",
+            "value": 10
+          }
+        ]
       }
     ],
     "messages": []

@@ -376,6 +376,16 @@ module core_top (
         32'h400: begin
           swap_bits <= bridge_wr_data[0];
         end
+        // Cheats
+        32'h404: begin
+          cheats_enabled <= bridge_wr_data[0];
+        end
+        32'h408: begin
+          debug_wipe <= bridge_wr_data[0];
+        end
+        32'h40C: begin
+          cheat_sel <= bridge_wr_data[3:0];
+        end
         // 32'h200: begin
         //   mb128_enable <= bridge_wr_data[0];
         // end
@@ -654,6 +664,9 @@ module core_top (
   reg extra_sprites_enable = 0;
   reg raw_rgb_enable = 0;
   reg mb128_enable = 0;
+  reg cheats_enabled = 0;
+  reg debug_wipe = 0;
+  reg [3:0] cheat_sel = 0;
 
   reg cd_audio_boost = 0;
   reg adpcm_audio_boost = 0;
@@ -672,13 +685,16 @@ module core_top (
   wire extra_sprites_enable_s;
   wire raw_rgb_enable_s;
   wire mb128_enable_s;
+  wire cheats_enabled_s;
+  wire debug_wipe_s;
+  wire [3:0] cheat_sel_s;
 
   wire cd_audio_boost_s;
   wire adpcm_audio_boost_s;
   wire [1:0] master_audio_boost_s;
 
   synch_3 #(
-      .WIDTH(14)
+      .WIDTH(20)
   ) settings_s (
       {
         turbo_tap_enable,
@@ -689,6 +705,9 @@ module core_top (
         extra_sprites_enable,
         raw_rgb_enable,
         mb128_enable,
+        cheats_enabled,
+        debug_wipe,
+        cheat_sel,
         cd_audio_boost,
         adpcm_audio_boost,
         master_audio_boost
@@ -702,6 +721,9 @@ module core_top (
         extra_sprites_enable_s,
         raw_rgb_enable_s,
         mb128_enable_s,
+        cheats_enabled_s,
+        debug_wipe_s,
+        cheat_sel_s,
         cd_audio_boost_s,
         adpcm_audio_boost_s,
         master_audio_boost_s
@@ -787,6 +809,10 @@ module core_top (
       .overscan_enable(overscan_enable_s),
       .extra_sprites_enable(extra_sprites_enable_s),
       .raw_rgb_enable(raw_rgb_enable_s),
+
+      .cheats_enabled(cheats_enabled_s),
+      .debug_wipe(debug_wipe_s),
+      .cheat_sel(cheat_sel_s),
 
       .mb128_enable(mb128_enable_s),
 

@@ -7,6 +7,8 @@
 #   make pce NO_SIGNALTAP=1     build without the qsf's SignalTap instrumentation
 #   make pce SEED=2             re-run the fitter with a different placement seed
 #   make pce SKIP_COMPILE=1     re-report existing outputs (no Quartus run)
+#   make dist                   package a flashable core -> build/pce/dist/
+#   make dist BUILD_NAME=foo    package build/foo instead
 #   make report                 regenerate build/pce/report.txt from existing outputs
 #   make shell                  interactive shell in the Quartus container
 #   make compare A=pce B=vanfanel   resource and timing delta between two builds
@@ -23,13 +25,16 @@ IMAGE   ?= localhost/pocket-quartus:25.1std
 REV     ?= pce_pocket
 HARNESS := tools/podman
 
-.PHONY: pce report compare shell clean
+.PHONY: pce dist report compare shell clean
 
 pce:
 	PODMAN=$(PODMAN) IMAGE=$(IMAGE) REV=$(REV) SEED=$(SEED) BUILD_NAME=$(BUILD_NAME) \
 	SKIP_COMPILE=$(SKIP_COMPILE) NO_SIGNALTAP=$(NO_SIGNALTAP) \
 	FITTER_EFFORT="$(FITTER_EFFORT)" NPROC="$(NPROC)" \
 	STRICT_TIMING=$(STRICT_TIMING) $(HARNESS)/build.sh
+
+dist:
+	REV=$(REV) BUILD_NAME=$(BUILD_NAME) $(HARNESS)/dist.sh
 
 report:
 	REV=$(REV) BUILD_NAME=$(BUILD_NAME) $(HARNESS)/report.sh
