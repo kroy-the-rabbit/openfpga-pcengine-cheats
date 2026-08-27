@@ -29,6 +29,16 @@ dupe=$(jq -r '[.interact.variables[].id] | group_by(.) | map(select(length>1)) |
 dupe=$(jq -r '[.interact.variables[].address] | group_by(.) | map(select(length>1)) | flatten | unique | @csv' "$C/interact.json")
 [ -z "$dupe" ] || bad "two interact variables share an address: $dupe"
 
+# The picker app keys on the core directory name and on the release asset
+# prefix derived from it, and it has no space in either. Upstream ships as
+# "agg23.PC Engine"; this fork is kroy.PCE to match kroy.GBC, kroy.GB and
+# kroy.GBA, and so nothing downstream has to quote a space.
+case "$CORE_DIR" in
+  *" "*) bad "core directory \"$CORE_DIR\" contains a space" ;;
+  kroy.*) say "core directory: $CORE_DIR" ;;
+  *) bad "core directory \"$CORE_DIR\" is not a kroy.* fork name" ;;
+esac
+
 # The bitstream is named by the manifest, not by convention: this core calls it
 # pce.rev where the sibling forks use bitstream.rbf_r, and packaging it under
 # the wrong name produces a core the Pocket lists and cannot start.

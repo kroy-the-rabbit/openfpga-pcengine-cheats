@@ -1,4 +1,4 @@
-**Download `kroy.PC_Engine_<version>.zip` below**, not the "Source code"
+**Download `kroy.PCE_<version>.zip` below**, not the "Source code"
 archives. Those are the repository, and the bitstream is built by CI rather
 than committed, so a core installed from one is listed by the Pocket but cannot
 start: *error in framework, can't find bitstream*.
@@ -6,7 +6,7 @@ start: *error in framework, can't find bitstream*.
 ## Installing
 
 Unzip and merge `Assets`, `Cores` and `Platforms` into the root of the SD card.
-This installs as `Cores/kroy.PC Engine`, beside any `agg23.PC Engine` install
+This installs as `Cores/kroy.PCE`, beside any `agg23.PC Engine` install
 rather than replacing it, and shares `Assets/pce` with it so ROMs and saves are
 not duplicated.
 

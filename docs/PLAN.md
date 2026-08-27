@@ -287,7 +287,7 @@ read physical cartridges: `~/Desktop/repos/pocket-gbc` does exactly that, with
 `core_top.sv:1008-1026`.
 
 This core has it disabled two ways: `"cartridge_adapter": -1` in
-`pkg/Cores/kroy.PC Engine/core.json`, and every `cart_tran_*` pin tied off at
+`pkg/Cores/kroy.PCE/core.json`, and every `cart_tran_*` pin tied off at
 `target/pocket/core_top.v:237-249` under the comment "cart is unused".
 
 Leaving it that way, for one reason beyond scope discipline: the GB core spends
