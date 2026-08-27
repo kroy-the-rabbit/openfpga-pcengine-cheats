@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# The cheap checks, on every push. No Quartus, no container, seconds rather
+# than the twenty minutes a fit takes.
+#
+# Both of these correspond to bugs that actually shipped from this repo. The
+# manifest rules cover APF limits the Pocket enforces at runtime and the core
+# has no way to report. The fixtures cover the .cht parser, where reading the
+# code was not enough to find the bug and running it over the corpus was.
+#
+# The database sweep is not run here: libretro's cht set is third-party content
+# this repo does not carry. Run it locally with
+#   tools/cheats/run-fixtures.sh "/path/to/NEC - PC Engine - TurboGrafx 16"
+# and it should report that none of the 397 files emits a code.
+name: test
+
+on:
+  push:
+    branches: [cheats]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: APF manifests
+        run: tools/cheats/check-manifests.sh
+
+      - name: Cheat parser fixtures
+        run: tools/cheats/run-fixtures.sh
+
+      - name: Shell scripts parse
+        run: |
+          for s in tools/podman/*.sh tools/cheats/*.sh; do
+            bash -n "$s" || exit 1
+          done
+          echo "all scripts parse"

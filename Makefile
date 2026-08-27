@@ -15,6 +15,13 @@
 #   make shell                  interactive shell in the Quartus container
 #   make compare A=pce B=vanfanel   resource and timing delta between two builds
 #   make clean                  remove build/
+#
+# CI runs the same build.sh with Quartus installed on the runner instead of in
+# the container, so a release build and a local one are the same build. See
+# .github/workflows/release.yml.
+#
+#   tools/cheats/check-manifests.sh   APF limits the Pocket enforces silently
+#   tools/cheats/run-fixtures.sh      .cht parser against known cases
 
 PODMAN  ?= podman
 # Repeatable timing closure. AUTO FIT, which the qsf asks for, lowers effort as
@@ -27,7 +34,7 @@ IMAGE   ?= localhost/pocket-quartus:25.1std
 REV     ?= pce_pocket
 HARNESS := tools/podman
 
-.PHONY: pce dist report compare shell clean
+.PHONY: pce dist report compare shell clean test
 
 pce:
 	PODMAN=$(PODMAN) IMAGE=$(IMAGE) REV=$(REV) SEED=$(SEED) BUILD_NAME=$(BUILD_NAME) \
@@ -37,6 +44,10 @@ pce:
 
 dist:
 	REV=$(REV) BUILD_NAME=$(BUILD_NAME) $(HARNESS)/dist.sh
+
+test:
+	tools/cheats/check-manifests.sh
+	tools/cheats/run-fixtures.sh "$(CHT_DB)"
 
 report:
 	REV=$(REV) BUILD_NAME=$(BUILD_NAME) $(HARNESS)/report.sh

@@ -47,9 +47,27 @@ echo "   bitstream $BITNAME, $(stat -c%s "$OUT/Cores/$CORE_DIR/$BITNAME") bytes 
 echo
 echo "   Copy the contents of $OUT onto the Pocket's SD card root."
 
-# Release archive, laid out so it unzips straight onto the SD card root. Named
-# after the core and its manifest version, matching the sibling forks.
+
+# A tagged build carries the tag as its version, so the Pocket shows what was
+# actually released rather than whatever the checked-in manifest last said.
+# Stamped into the packaged copy only; the repo manifest is left alone.
 VERSION="$(jq -r '.core.metadata.version' "$CORE_JSON")"
+if [ -n "${RELEASE_NAME:-}" ]; then
+  VERSION="${RELEASE_NAME#v}"
+  if [ "${#VERSION}" -gt 31 ]; then
+    echo "version too long for APF: $VERSION" >&2
+    exit 1
+  fi
+  tmp="$(mktemp)"
+  jq --indent 2 --arg v "$VERSION" --arg d "$(date -u +%Y-%m-%d)" \
+     '.core.metadata.version = $v | .core.metadata.date_release = $d' \
+     "$OUT/Cores/$CORE_DIR/core.json" > "$tmp"
+  mv "$tmp" "$OUT/Cores/$CORE_DIR/core.json"
+  echo "   stamped   version=$VERSION"
+fi
+
+# Release archive, laid out so it unzips straight onto the SD card root. Named
+# after the core and its version, matching the sibling forks.
 ZIP="$ROOT/build/$NAME/${CORE_DIR// /_}_${VERSION}.zip"
 rm -f "$ZIP"
 (cd "$OUT" && zip -qr "$ZIP" .)

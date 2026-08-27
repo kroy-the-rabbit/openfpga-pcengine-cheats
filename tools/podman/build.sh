@@ -72,21 +72,38 @@ if [[ -n "${SEED:-}" ]]; then
 fi
 
 # ---- 3. Compile ------------------------------------------------------------
+# Quartus comes either from the container or from the machine. CI installs
+# Quartus Lite on the runner and exports QUARTUS_ROOTDIR; it is the same
+# 25.1std the local image holds, so a CI build and a local one are the same
+# build rather than two toolchains that have to be kept in step.
+if [[ -n "${QUARTUS_ROOTDIR:-}" ]]; then
+  echo "== quartus native $QUARTUS_ROOTDIR"
+  quartus() ( cd "$WORK/projects" && "$QUARTUS_ROOTDIR/bin/quartus_sh" "$@" )
+else
+  quartus() {
+    $PODMAN run --rm \
+      --userns=keep-id --security-opt label=disable \
+      -v "$WORK:/work" -w /work/projects -e HOME=/tmp \
+      "$IMAGE" quartus_sh "$@"
+  }
+fi
+
 if [[ -z "${SKIP_COMPILE:-}" ]]; then
   start=$(date +%s)
   set +e
-  $PODMAN run --rm \
-    --userns=keep-id --security-opt label=disable \
-    -v "$WORK:/work" -w /work/projects -e HOME=/tmp \
-    "$IMAGE" quartus_sh --flow compile "$REV" 2>&1 | tee "$BDIR/build.log"
+  quartus --flow compile "$REV" 2>&1 | tee "$BDIR/build.log"
   rc=${PIPESTATUS[0]}
   set -e
   echo "$(( $(date +%s) - start ))" > "$BDIR/elapsed"
   [[ $rc -eq 0 ]] || { echo "quartus failed (rc=$rc), see $BDIR/build.log" >&2; exit "$rc"; }
-  $PODMAN run --rm "$IMAGE" quartus_sh --version 2>/dev/null | sed -n 2p > "$BDIR/quartus.version" || true
+  quartus --version 2>/dev/null | sed -n 2p > "$BDIR/quartus.version" || true
 else
   echo "== SKIP_COMPILE set, reporting existing outputs"
 fi
 
 echo
 GIT_SHA="$GIT_SHA" GIT_DIRTY="$GIT_DIRTY" REV="$REV" "$HERE/report.sh"
+
+# Package last, and only once timing has been checked: report.sh exits 3 on
+# negative slack, so a failing build never produces a zip somebody could ship.
+BUILD_NAME="${BUILD_NAME:-pce}" REV="$REV" RELEASE_NAME="${RELEASE_NAME:-}" "$HERE/dist.sh"
