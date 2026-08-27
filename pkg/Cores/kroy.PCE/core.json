@@ -5,11 +5,11 @@
       "platform_ids": [
         "pce"
       ],
-      "shortname": "PC Engine",
+      "shortname": "PCE",
       "description": "PC Engine / TurboGrafx-16 (cheats)",
       "author": "kroy",
       "url": "https://github.com/kroy-the-rabbit/openfpga-pcengine-cheats",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "date_release": "2026-08-26"
     },
     "framework": {

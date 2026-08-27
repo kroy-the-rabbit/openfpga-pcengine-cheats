@@ -29,6 +29,20 @@ dupe=$(jq -r '[.interact.variables[].id] | group_by(.) | map(select(length>1)) |
 dupe=$(jq -r '[.interact.variables[].address] | group_by(.) | map(select(length>1)) | flatten | unique | @csv' "$C/interact.json")
 [ -z "$dupe" ] || bad "two interact variables share an address: $dupe"
 
+# The Pocket resolves a core by its directory name, and that name has to be
+# exactly "<author>.<shortname>" from core.json. Renaming the directory to
+# kroy.PCE while shortname still read "PC Engine" produced a core the Pocket
+# listed and then refused to start with "error in core setup". It cost two
+# releases to find, because the bitstream and every other manifest were fine
+# and the failure looked nothing like a naming problem.
+AUTHOR="$(jq -r '.core.metadata.author' "$C/core.json")"
+SHORT="$(jq -r '.core.metadata.shortname' "$C/core.json")"
+if [ "$CORE_DIR" = "$AUTHOR.$SHORT" ]; then
+  say "author.shortname: $AUTHOR.$SHORT"
+else
+  bad "core directory \"$CORE_DIR\" is not \"$AUTHOR.$SHORT\", which core.json metadata requires"
+fi
+
 # The picker app keys on the core directory name and on the release asset
 # prefix derived from it, and it has no space in either. Upstream ships as
 # "agg23.PC Engine"; this fork is kroy.PCE to match kroy.GBC, kroy.GB and
