@@ -53,13 +53,17 @@ section used to describe is not needed. The one caveat is that vanfanel's fit
 took 44 minutes against the baseline's 19; repeated runs would say whether that
 is the design or just machine load, and it does not affect the result.
 
-Remotes are configured with pushes disabled on both upstreams. Branches:
+Both upstreams have their push URL set to DISABLED, so work here cannot land
+in someone else's repo by accident. `origin` is the fork. Branches:
 
-    master         tracks agg23, untouched
-    agg23-base     agg23 + harness, holds the baseline measurement
-    vanfanel-base  vanfanel + harness, the control build
-    cheats         vanfanel + harness + SGX removal, the working line
+    master          the working line: vanfanel + harness + SGX removal + cheats
+    agg23-upstream  agg23 master, untouched, for diffing against
+    agg23-base      agg23 + harness, holds the baseline measurement
+    vanfanel-base   vanfanel + harness, the control build
 
+The working line was called `cheats` until the fork was published. It is
+`master` now because that is the branch a release is cut from, and
+.github/workflows/release.yml refuses to publish a tag that is not on it.
 ---
 
 ## 1. What this core already has

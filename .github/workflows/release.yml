@@ -26,7 +26,28 @@ env:
   QROOT: /opt/intelFPGA_lite/25.1std
 
 jobs:
+  # A tag fires this workflow wherever it was made: `on: push: tags` has no
+  # branch filter, and GitHub offers none. So the first thing a release does is
+  # prove the tagged commit is actually on master. Without this, tagging a
+  # scratch branch publishes it as a release.
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag must be on master
+        run: |
+          git fetch --no-tags origin master:refs/remotes/origin/master
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/master; then
+            echo "$GITHUB_REF_NAME is on master"
+          else
+            echo "::error::$GITHUB_REF_NAME is not on master; refusing to release"
+            exit 1
+          fi
+
   build:
+    needs: guard
     runs-on: ubuntu-latest
     timeout-minutes: 300
     # 22.04: Quartus wants libtinfo5 and libncurses5, which 24.04 dropped.
