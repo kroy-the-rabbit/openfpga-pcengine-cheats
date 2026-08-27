@@ -79,9 +79,14 @@ module pce (
     // cheats present still boots exactly like one without.
     input wire cheats_enabled,
     // Diagnostic: sweeps work RAM with a constant. See cheat_poker.sv.
-    input wire debug_wipe,
-    // Test-cheat selector. See the table in cheat_poker.sv.
-    input wire [3:0] cheat_sel,
+    input wire cheat_busy,   // a .cht file is loading, table is in flux
+
+    // Cheat table load port, from cheat_loader in core_top.
+    input wire        cheat_code_wr,
+    input wire  [4:0] cheat_code_index,
+    input wire [12:0] cheat_code_addr,
+    input wire  [7:0] cheat_code_data,
+    input wire  [5:0] cheat_code_total,
 
     input wire mb128_enable,
 
@@ -274,32 +279,26 @@ module pce (
   );
 
   // Cheats. Every published PC Engine code is a work RAM poke, so this is the
-  // whole cheat path rather than a companion to the read override. P1 seeds one
-  // code from parameters and leaves the load port idle; P2 adds cheat_loader
-  // and drops SEED_EN.
+  // whole cheat path rather than a companion to the read override.
   //
-  // The test cheat is chosen at runtime from the menu rather than compiled in,
-  // so trying another one does not cost a 15 minute rebuild.
+  // Codes come from the .cht file in data slot 2, parsed by cheat_loader in
+  // core_top. Enable state comes from the file too, not from the menu: APF
+  // fixes menu labels at build time, so a per-cheat checkbox could only ever
+  // say "Cheat 1".
   cheat_poker #(
-      .SEED_EN(1),
-      .DEBUG_WIPE(1),
-      .WIPE_DATA(8'h00)
+      .MAX_CODES(32),
+      .INDEX_W  (5)
   ) cheat_poker (
       .clk       (clk_sys_42_95),
       .reset     (reset | cart_download),
       .enable    (cheats_enabled),
       .vblank    (vbl),
-      .blocked   (cart_download),
-      .wipe      (debug_wipe),
-      .sel       (cheat_sel),
-
-      .code_clear(1'b0),
-      .code_wr   (1'b0),
-      .code_index(5'd0),
-      .code_addr (13'd0),
-      .code_data (8'd0),
-      .code_live (1'b0),
-      .code_count(),
+      .blocked   (cart_download | cheat_busy),
+      .code_wr   (cheat_code_wr),
+      .code_index(cheat_code_index),
+      .code_addr (cheat_code_addr),
+      .code_data (cheat_code_data),
+      .code_total(cheat_code_total),
 
       .poke_wr  (poke_wr),
       .poke_addr(poke_addr),

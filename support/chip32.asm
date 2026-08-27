@@ -82,3 +82,14 @@ db "Error",0
 
 load_err_msg:
 db "Could not load ROM",0
+// NOT BUILT INTO THE CORE ANY MORE.
+//
+// Kept for reference. This program loaded slot 0 and slot 1 by name and then
+// exited, and with a chip32 program present APF loads only what the program
+// asks for, so the Cheats slot could never be delivered. Removing it lets APF
+// load every declared slot itself, which is how the GB/GBC fork works. The
+// only other thing it did was set is_sgx from the ROM extension, which is dead
+// while SGX_EN is 0. See target/pocket/core_top.v.
+//
+// There is no assembler for this in the repo (bass with chip32.vm), so it
+// cannot currently be rebuilt anyway.

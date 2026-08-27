@@ -193,10 +193,21 @@ So `FITTER_EFFORT="STANDARD FIT"` is now the harness default, with
 copy only, so the checked-in project file stays as upstream wrote it, and
 `make pce FITTER_EFFORT=` builds the way upstream does.
 
-**What this does not do** is make the path comfortable. STANDARD FIT stops the
-fitter giving up early and landing negative; it does not lift the margin out of
-the 0.10-0.12 ns band every passing build sits in. This path stays the thing to
-check on every build.
+**What this does not do** is make the path safe. An earlier version of this
+section claimed STANDARD FIT "stops the fitter giving up early and landing
+negative". That was wrong, and later builds disproved it: `p2` landed at
+-0.011 ns and `fix` at -0.013 ns, both under STANDARD FIT at the default seed.
+
+What STANDARD FIT actually does is make a negative landing less frequent, not
+impossible. The full STANDARD FIT record is +0.109, +0.093, -0.011, +0.109,
+-0.013: two failures in five. The margin still sits in the same 0.09-0.12 ns
+band when it passes.
+
+So the rule is not "use STANDARD FIT and trust it". It is **check report.txt
+every build, and re-fit at another SEED when it lands negative**. A negative
+landing is not evidence the change caused it; `osd` added 345 ALMs on the video
+path and moved the slack *up* 0.120 ns against `p2`, which is not how a real
+hold regression behaves.
 
 ### One fix that does *not* apply here
 
