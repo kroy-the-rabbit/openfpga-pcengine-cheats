@@ -32,6 +32,9 @@ BITNAME="$(jq -r '.core.cores[0].filename' "$CORE_JSON")"
 rm -rf "$OUT"
 mkdir -p "$OUT"
 cp -r "$ROOT/pkg/." "$OUT/"
+# .gitkeep only exists to keep the empty Assets directory in git; it has no
+# business on an SD card or in a release archive.
+find "$OUT" -name .gitkeep -delete
 
 # unpack 'b*' reads each byte LSB-first, pack 'B*' writes it MSB-first, so the
 # round trip is exactly a per-byte bit reversal. Byte order is unchanged.
@@ -43,3 +46,11 @@ echo "   core      $CORE_DIR"
 echo "   bitstream $BITNAME, $(stat -c%s "$OUT/Cores/$CORE_DIR/$BITNAME") bytes (from $REV.rbf, $(stat -c%s "$RBF") bytes)"
 echo
 echo "   Copy the contents of $OUT onto the Pocket's SD card root."
+
+# Release archive, laid out so it unzips straight onto the SD card root. Named
+# after the core and its manifest version, matching the sibling forks.
+VERSION="$(jq -r '.core.metadata.version' "$CORE_JSON")"
+ZIP="$ROOT/build/$NAME/${CORE_DIR// /_}_${VERSION}.zip"
+rm -f "$ZIP"
+(cd "$OUT" && zip -qr "$ZIP" .)
+echo "   release   $ZIP ($(stat -c%s "$ZIP") bytes)"

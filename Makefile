@@ -9,6 +9,8 @@
 #   make pce SKIP_COMPILE=1     re-report existing outputs (no Quartus run)
 #   make dist                   package a flashable core -> build/pce/dist/
 #   make dist BUILD_NAME=foo    package build/foo instead
+#                               also writes a release zip you can unpack onto
+#                               the SD card root
 #   make report                 regenerate build/pce/report.txt from existing outputs
 #   make shell                  interactive shell in the Quartus container
 #   make compare A=pce B=vanfanel   resource and timing delta between two builds
