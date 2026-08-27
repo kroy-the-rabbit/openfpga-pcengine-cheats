@@ -56,14 +56,15 @@ is the design or just machine load, and it does not affect the result.
 Both upstreams have their push URL set to DISABLED, so work here cannot land
 in someone else's repo by accident. `origin` is the fork. Branches:
 
-    master          the working line: vanfanel + harness + SGX removal + cheats
+    main            the working line: vanfanel + harness + SGX removal + cheats
     agg23-upstream  agg23 master, untouched, for diffing against
     agg23-base      agg23 + harness, holds the baseline measurement
     vanfanel-base   vanfanel + harness, the control build
 
-The working line was called `cheats` until the fork was published. It is
-`master` now because that is the branch a release is cut from, and
-.github/workflows/release.yml refuses to publish a tag that is not on it.
+The working line was called `cheats` until the fork was published, and then
+`master` briefly. It is `main` now, in step with the GB/GBC and GBA forks, and
+it is the branch a release is cut from: .github/workflows/release.yml refuses
+to publish a tag that is not on it.
 ---
 
 ## 1. What this core already has

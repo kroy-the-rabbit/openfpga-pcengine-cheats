@@ -41,4 +41,4 @@ or generated with the cheats you want turned on.
 sha256sum -c SHA256SUMS --ignore-missing
 ```
 
-Cheats are documented in [docs/CHEATS.md](https://github.com/kroy-the-rabbit/openfpga-pcengine-cheats/blob/master/docs/CHEATS.md).
+Cheats are documented in [docs/CHEATS.md](https://github.com/kroy-the-rabbit/openfpga-pcengine-cheats/blob/main/docs/CHEATS.md).
