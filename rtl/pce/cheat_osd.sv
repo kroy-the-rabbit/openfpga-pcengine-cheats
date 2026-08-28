@@ -48,7 +48,11 @@ module cheat_osd #(
     // glyph is what keeps lines apart.
     parameter CELL = 6,
     parameter COLS = 26,
-    parameter ROWS = 18
+    parameter ROWS = 18,
+
+    // Top left corner of the panel, in the core's own pixels.
+    parameter X0 = 16,
+    parameter Y0 = 16
 ) (
     input  wire        clk,          // clk_sys_42_95, the video clock here
     input  wire        reset,
@@ -96,8 +100,18 @@ module cheat_osd #(
     end
   end
 
-  wire [4:0] text_row  = py[7:3];
-  wire [2:0] glyph_row = py[2:0];
+  // Inset from the corner rather than flush against it. The Game Boy version
+  // starts at pixel 0 because there `de` is exactly the 160 visible pixels. The
+  // PC Engine's active region is not the visible region: the first cell landed
+  // in overscan and the leftmost characters were cut off the side of the panel
+  // on hardware. A margin is the fix, and a generous one costs nothing: the
+  // panel is 156x144 and the narrowest mode is 256x224.
+  wire [8:0] rel_y  = py - Y0[8:0];
+  wire       past_x = (px >= X0[8:0]);
+  wire       in_y   = (py >= Y0[8:0]) && (rel_y < (ROWS * 8));
+
+  wire [4:0] text_row  = rel_y[7:3];
+  wire [2:0] glyph_row = rel_y[2:0];
 
   // 6 does not divide a bit slice, so the column is counted rather than sliced
   // out of px. Both follow px exactly, one step per active pixel.
@@ -111,7 +125,8 @@ module cheat_osd #(
   reg [2:0] pixel_col = 0;
 
   always @(posedge clk) begin
-    if (reset || !de) begin
+    // Held at zero until the margin is passed, so the first cell begins at X0.
+    if (reset || !de || !past_x) begin
       text_col  <= 7'd0;
       pixel_col <= 3'd0;
     end else if (ce_pix) begin
@@ -236,9 +251,9 @@ module cheat_osd #(
   // therefore always clear: the gap between letters needs no special case.
   // Indexed only inside the panel: past it the column counter runs on to the
   // end of the line and would address off the end of the buffer.
-  wire in_panel = (text_col < COLS[6:0]);
+  wire in_panel = past_x && (text_col < COLS[6:0]);
   wire [7:0] bits = in_panel ? line_bits[text_col[4:0]] : 8'd0;
-  assign active = show && de && row_used && in_panel && (py < (ROWS*8));
+  assign active = show && de && row_used && in_panel && in_y;
   assign ink    = active && bits[3'd7 - pixel_col];
 
 endmodule
