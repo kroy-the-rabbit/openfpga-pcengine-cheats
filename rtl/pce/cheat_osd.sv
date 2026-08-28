@@ -47,12 +47,18 @@ module cheat_osd #(
     // leaves a clear column between letters. Rows stay at 8: the gap under a
     // glyph is what keeps lines apart.
     parameter CELL = 6,
-    parameter COLS = 26,
-    parameter ROWS = 18,
+    parameter COLS = 29,   // COL0 + 26 characters
+    parameter ROWS = 20,   // ROW0 + header + 17 lines
 
-    // Top left corner of the panel, in the core's own pixels.
-    parameter X0 = 16,
-    parameter Y0 = 16
+    // Inset from the top left corner, in cells and rows rather than pixels.
+    // Counted in cells because that is what makes it free: the offset is
+    // applied when the line buffer is filled, during blanking, instead of to
+    // the pixel counters. An earlier version subtracted a pixel offset from py
+    // and gated the column counter on px, which put a subtractor and a
+    // comparator on the pixel-rate path and cost 1,552 ALMs and 3.4x the fit
+    // time for what is a cosmetic offset.
+    parameter COL0 = 3,
+    parameter ROW0 = 2
 ) (
     input  wire        clk,          // clk_sys_42_95, the video clock here
     input  wire        reset,
@@ -79,7 +85,7 @@ module cheat_osd #(
 );
 
   localparam HDR_ROWS  = 1;
-  localparam MAX_LINES = ROWS - HDR_ROWS;
+  localparam MAX_LINES = ROWS - ROW0 - HDR_ROWS;
 
   // ------------------------------------------------------------- pixels ----
   reg [8:0] px = 0;
@@ -100,18 +106,11 @@ module cheat_osd #(
     end
   end
 
-  // Inset from the corner rather than flush against it. The Game Boy version
-  // starts at pixel 0 because there `de` is exactly the 160 visible pixels. The
-  // PC Engine's active region is not the visible region: the first cell landed
-  // in overscan and the leftmost characters were cut off the side of the panel
-  // on hardware. A margin is the fix, and a generous one costs nothing: the
-  // panel is 156x144 and the narrowest mode is 256x224.
-  wire [8:0] rel_y  = py - Y0[8:0];
-  wire       past_x = (px >= X0[8:0]);
-  wire       in_y   = (py >= Y0[8:0]) && (rel_y < (ROWS * 8));
-
-  wire [4:0] text_row  = rel_y[7:3];
-  wire [2:0] glyph_row = rel_y[2:0];
+  // Plain slices of py, deliberately. The panel is inset by leaving its first
+  // ROW0 rows and COL0 columns empty rather than by moving the raster origin,
+  // so nothing here has to do arithmetic at pixel rate.
+  wire [4:0] text_row  = py[7:3];
+  wire [2:0] glyph_row = py[2:0];
 
   // 6 does not divide a bit slice, so the column is counted rather than sliced
   // out of px. Both follow px exactly, one step per active pixel.
@@ -125,8 +124,7 @@ module cheat_osd #(
   reg [2:0] pixel_col = 0;
 
   always @(posedge clk) begin
-    // Held at zero until the margin is passed, so the first cell begins at X0.
-    if (reset || !de || !past_x) begin
+    if (reset || !de) begin
       text_col  <= 7'd0;
       pixel_col <= 3'd0;
     end else if (ce_pix) begin
@@ -199,12 +197,22 @@ module cheat_osd #(
   // so both halves of a line agree on which column they are drawing.
   reg [4:0] fill_col_d1 = 0, fill_col_d2 = 0, fill_col_d3 = 0;
   reg       fill_hdr_d1 = 0, fill_hdr_d2 = 0, fill_hdr_d3 = 0;
+  reg       fill_pre_d1 = 0, fill_pre_d2 = 0, fill_pre_d3 = 0;
+  reg [4:0] fill_src_d1 = 0, fill_src_d2 = 0, fill_src_d3 = 0;
+
+  // Which character of the title this cell shows. The first COL0 cells have
+  // none, and are blanked by fill_pre rather than by reading somewhere safe.
+  wire [4:0] src_col = (fill >= COL0[5:0]) ? (fill[4:0] - COL0[4:0]) : 5'd0;
   reg [5:0] hdr_char_d1 = 0, hdr_char_d2 = 0, hdr_char_d3 = 0;
 
-  wire       in_header = (text_row < HDR_ROWS[4:0]);
-  wire [4:0] row_index = text_row - HDR_ROWS[4:0];
+  // The first ROW0 rows are left blank, which is the vertical half of the inset.
+  wire       above     = (text_row < ROW0[4:0]);
+  wire       in_header = !above && (text_row < (ROW0[4:0] + HDR_ROWS[4:0]));
+  wire [4:0] row_index = text_row - ROW0[4:0] - HDR_ROWS[4:0];
   wire       row_used  = in_header
-                      || (row_index < MAX_LINES[4:0] && {1'b0, row_index} < title_count);
+                      || (!above && text_row >= (ROW0[4:0] + HDR_ROWS[4:0])
+                          && row_index < MAX_LINES[4:0]
+                          && {1'b0, row_index} < title_count);
 
   // The fill runs on the full clock, not ce_pix: it has a whole blanking
   // period to do 29 reads and the pixel rate is the slow thing here.
@@ -220,29 +228,39 @@ module cheat_osd #(
       else                 fill <= fill + 6'd1;
     end
 
-    // Address stage: ask the title RAM and the font for column `fill`.
+    // Address stage. The destination column is `fill`; the source is COL0
+    // cells earlier, so the first COL0 cells of every line come out blank and
+    // the text begins inset. Doing it here rather than at the pixel counters
+    // is what keeps the offset free: this runs once per column during
+    // blanking, not once per pixel.
     title_group <= (row_used && !in_header) ? row_index : 5'd0;
-    title_col   <= fill[4:0];
+    title_col   <= src_col;
     fill_col_d1 <= fill[4:0];
     fill_hdr_d1 <= in_header;
-    hdr_char_d1 <= header_char(fill[4:0]);
+    fill_pre_d1 <= (fill < COL0[5:0]);
+    fill_src_d1 <= src_col;
+    hdr_char_d1 <= header_char(src_col);
 
     // Data stage: the RAM is answering.
     fill_col_d2 <= fill_col_d1;
     fill_hdr_d2 <= fill_hdr_d1;
+    fill_pre_d2 <= fill_pre_d1;
+    fill_src_d2 <= fill_src_d1;
     hdr_char_d2 <= hdr_char_d1;
     fill_col_d3 <= fill_col_d2;
     fill_hdr_d3 <= fill_hdr_d2;
+    fill_pre_d3 <= fill_pre_d2;
+    fill_src_d3 <= fill_src_d2;
     hdr_char_d3 <= hdr_char_d2;
 
     // Write stage: the glyph row is out.
     if (filling && fill >= 6'd3 && fill_col_d3 < COLS[4:0])
-      line_bits[fill_col_d3] <= row_used ? font_bits : 8'd0;
+      line_bits[fill_col_d3] <= (row_used && !fill_pre_d3) ? font_bits : 8'd0;
   end
 
   // The title RAM answers two cycles after being asked, so the header is
   // delayed by the same two or the halves of a line disagree about the column.
-  wire beyond = !fill_hdr_d3 && (fill_col_d3 >= title_len);
+  wire beyond = !fill_hdr_d3 && (fill_src_d3 >= title_len);
   assign font_ch  = fill_hdr_d3 ? hdr_char_d3 : (beyond ? SP : title_char);
   assign font_row = glyph_row;
 
@@ -251,9 +269,9 @@ module cheat_osd #(
   // therefore always clear: the gap between letters needs no special case.
   // Indexed only inside the panel: past it the column counter runs on to the
   // end of the line and would address off the end of the buffer.
-  wire in_panel = past_x && (text_col < COLS[6:0]);
+  wire in_panel = (text_col < COLS[6:0]);
   wire [7:0] bits = in_panel ? line_bits[text_col[4:0]] : 8'd0;
-  assign active = show && de && row_used && in_panel && in_y;
+  assign active = show && de && row_used && in_panel && (py < (ROWS*8));
   assign ink    = active && bits[3'd7 - pixel_col];
 
 endmodule
