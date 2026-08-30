@@ -330,15 +330,6 @@ module core_top (
 
     if (bridge_wr) begin
       casex (bridge_addr)
-        32'h0: begin
-          ioctl_download <= bridge_wr_data[0];
-        end
-        32'h4: begin
-          save_download <= bridge_wr_data[0];
-        end
-        32'h8: begin
-          is_sgx <= bridge_wr_data[0];
-        end
         32'h50: begin
           reset_delay <= 32'h100000;
         end
@@ -371,6 +362,17 @@ module core_top (
         end
         32'h308: begin
           cd_audio_boost <= bridge_wr_data[0];
+        end
+        // ROM loading options
+        32'h400: begin
+          swap_bits <= bridge_wr_data[0];
+        end
+        // Cheats
+        32'h404: begin
+          cheats_enabled <= bridge_wr_data[0];
+        end
+        32'h408: begin
+          show_cheats <= bridge_wr_data[0];
         end
         // 32'h200: begin
         //   mb128_enable <= bridge_wr_data[0];
@@ -486,9 +488,29 @@ module core_top (
       .datatable_q   (datatable_q)
   );
 
-  reg ioctl_download = 0;
-  reg save_download = 0;
-  reg is_sgx = 0;
+  // Which slot APF is currently streaming.
+  //
+  // Upstream drove these from bridge writes at 0x0, 0x4 and 0x8, issued by the
+  // chip32 VM program in support/chip32.asm. That program loads slot 0 and
+  // slot 1 by name and then exits, so a third slot could never be delivered:
+  // with a chip32 program present APF loads only what the program asks for.
+  // The GB/GBC fork ships no chip32 at all, which is why the same Cheats slot
+  // declaration works there, and it is why this core no longer ships one
+  // either. APF now loads every declared slot itself and these follow the
+  // dataslot handshake instead.
+  //
+  // The only other thing the program did was sniff the ROM extension to set
+  // is_sgx, which is dead here: SGX_EN is 0, so main.sv ands it away.
+  reg any_download = 0;
+  always @(posedge clk_74a) begin
+    if (dataslot_requestwrite) any_download <= 1;
+    else if (dataslot_allcomplete) any_download <= 0;
+  end
+
+  wire ioctl_download = any_download && dataslot_requestwrite_id == 16'd0;
+  wire save_download  = any_download && dataslot_requestwrite_id == 16'd1;
+  wire is_sgx = 1'b0;
+  reg swap_bits = 0;
   wire ioctl_wr;
   wire [23:0] ioctl_addr;
   wire [15:0] ioctl_dout;
@@ -514,12 +536,17 @@ module core_top (
   wire ioctl_download_s;
   wire save_download_s;
   wire is_sgx_s;
+  wire swap_bits_s;
+  // Declared here rather than with the other settings below, because the
+  // synchroniser just under this line uses it.
+  reg  show_cheats = 0;
+  wire show_cheats_v;   // show_cheats in the video clock domain
 
   synch_3 #(
-      .WIDTH(3)
+      .WIDTH(5)
   ) download_s (
-      {ioctl_download, save_download, is_sgx},
-      {ioctl_download_s, save_download_s, is_sgx_s},
+      {ioctl_download, save_download, is_sgx, swap_bits, show_cheats},
+      {ioctl_download_s, save_download_s, is_sgx_s, swap_bits_s, show_cheats_v},
       clk_mem_85_91
   );
 
@@ -578,6 +605,103 @@ module core_top (
       .write_en  (sd_wr),
       .write_addr(sd_buff_addr_in),
       .write_data(sd_buff_dout)
+  );
+
+  // ------------------------------------------------------------------
+  // Cheats. Data slot 2 streams a libretro .cht file to 0x5xxxxxxx one byte at
+  // a time; cheat_loader parses the ASCII as it arrives and writes the usable
+  // codes into cheat_poker's table. See docs/CHEATS.md.
+  //
+  // OUTPUT_WORD_SIZE 1 means four FIFO entries per 32-bit APF word, and APF
+  // delivers a word roughly every 75 clk_74a cycles, so the drain has to stay
+  // ahead of that. The default delay of 4 gives 16 clk_sys cycles per word,
+  // comfortably ahead; the 32 used for the ROM loader above would not be.
+  // ------------------------------------------------------------------
+  wire       cheat_wr;
+  wire [7:0] cheat_dout;
+
+  data_loader #(
+      .ADDRESS_MASK_UPPER_4(4'h5),
+      .ADDRESS_SIZE(24),
+      .OUTPUT_WORD_SIZE(1),
+      .WRITE_MEM_CLOCK_DELAY(4),
+      .WRITE_MEM_EN_CYCLE_LENGTH(1)
+  ) cheat_data_loader (
+      .clk_74a(clk_74a),
+      .clk_memory(clk_sys_42_95),
+
+      .bridge_wr(bridge_wr),
+      .bridge_endian_little(bridge_endian_little),
+      .bridge_addr(bridge_addr),
+      .bridge_wr_data(bridge_wr_data),
+
+      .write_en  (cheat_wr),
+      .write_addr(),
+      .write_data(cheat_dout)
+  );
+
+  // A cheat file belongs to the game it was loaded for, so the parser restarts
+  // whenever a new cheat file or a new ROM starts arriving, and at core reset.
+  // The reset term is not optional: without it the parser could reach the poker
+  // having never been reset, and a stray code_wr puts a poke in work RAM.
+  wire cheat_download = any_download && dataslot_requestwrite_id == 16'd2;
+
+  // Edge-detect off the second and third synchroniser stages rather than the
+  // first: cheat_download and ioctl_download are combinational from a compare
+  // in the clk_74a domain, and this pulse resets every register in the path.
+  reg cheat_dl_s, cheat_dl_s2, cheat_dl_s3;
+  reg cart_dl_s, cart_dl_s2, cart_dl_s3;
+  always @(posedge clk_sys_42_95) begin
+    cheat_dl_s  <= cheat_download;
+    cheat_dl_s2 <= cheat_dl_s;
+    cheat_dl_s3 <= cheat_dl_s2;
+    cart_dl_s   <= ioctl_download;
+    cart_dl_s2  <= cart_dl_s;
+    cart_dl_s3  <= cart_dl_s2;
+  end
+
+  // A cheat file can arrive after the ROM, so the poker has to be held off
+  // while the table is being rewritten under it. Without this it can spend a
+  // frame poking a half-loaded table: a stale address with a fresh value.
+  wire cheat_busy = cheat_dl_s2;
+
+  wire cheat_reset = ~reset_n
+                   | (cheat_dl_s2 & ~cheat_dl_s3)
+                   | (cart_dl_s2  & ~cart_dl_s3);
+
+  wire       cheat_code_wr;
+  wire [4:0] cheat_code_index;
+  wire [12:0] cheat_code_addr;
+  wire [7:0] cheat_code_data;
+  wire [5:0] cheat_code_total;
+  wire [5:0] cheat_group_count;
+  wire [19:0] cheat_byte_count;
+  wire        cheat_desc_wr, cheat_desc_end;
+  wire  [4:0] cheat_desc_group, cheat_desc_col;
+  wire  [5:0] cheat_desc_char;
+  wire  [5:0] cheat_title_count;
+
+  cheat_loader #(
+      .MAX_CODES(32),
+      .INDEX_W  (5)
+  ) cheat_loader (
+      .clk        (clk_sys_42_95),
+      .reset      (cheat_reset),
+      .wr         (cheat_wr),
+      .data       (cheat_dout),
+      .code_wr    (cheat_code_wr),
+      .code_index (cheat_code_index),
+      .code_addr  (cheat_code_addr),
+      .code_data  (cheat_code_data),
+      .code_total (cheat_code_total),
+      .desc_wr    (cheat_desc_wr),
+      .desc_group (cheat_desc_group),
+      .desc_col   (cheat_desc_col),
+      .desc_char  (cheat_desc_char),
+      .desc_end   (cheat_desc_end),
+      .title_count(cheat_title_count),
+      .group_count(cheat_group_count),
+      .byte_count (cheat_byte_count)
   );
 
   data_unloader #(
@@ -648,6 +772,7 @@ module core_top (
   reg extra_sprites_enable = 0;
   reg raw_rgb_enable = 0;
   reg mb128_enable = 0;
+  reg cheats_enabled = 0;
 
   reg cd_audio_boost = 0;
   reg adpcm_audio_boost = 0;
@@ -666,13 +791,14 @@ module core_top (
   wire extra_sprites_enable_s;
   wire raw_rgb_enable_s;
   wire mb128_enable_s;
+  wire cheats_enabled_s;
 
   wire cd_audio_boost_s;
   wire adpcm_audio_boost_s;
   wire [1:0] master_audio_boost_s;
 
   synch_3 #(
-      .WIDTH(14)
+      .WIDTH(15)
   ) settings_s (
       {
         turbo_tap_enable,
@@ -683,6 +809,7 @@ module core_top (
         extra_sprites_enable,
         raw_rgb_enable,
         mb128_enable,
+        cheats_enabled,
         cd_audio_boost,
         adpcm_audio_boost,
         master_audio_boost
@@ -696,6 +823,7 @@ module core_top (
         extra_sprites_enable_s,
         raw_rgb_enable_s,
         mb128_enable_s,
+        cheats_enabled_s,
         cd_audio_boost_s,
         adpcm_audio_boost_s,
         master_audio_boost_s
@@ -717,6 +845,7 @@ module core_top (
       .pll_core_locked(pll_core_locked),
 
       .sgx(is_sgx_s),
+      .swap_bits(swap_bits_s),
 
       // Input
       .p1_button_1(cont1_key_s[4]),
@@ -781,6 +910,15 @@ module core_top (
       .extra_sprites_enable(extra_sprites_enable_s),
       .raw_rgb_enable(raw_rgb_enable_s),
 
+      .cheats_enabled(cheats_enabled_s),
+      .cheat_busy(cheat_busy),
+
+      .cheat_code_wr(cheat_code_wr),
+      .cheat_code_index(cheat_code_index),
+      .cheat_code_addr(cheat_code_addr),
+      .cheat_code_data(cheat_code_data),
+      .cheat_code_total(cheat_code_total),
+
       .mb128_enable(mb128_enable_s),
 
       .cd_audio_boost(cd_audio_boost_s),
@@ -843,6 +981,80 @@ module core_top (
 
   assign video_skip = 0;
 
+  // ---------------------------------------------------------------- overlay
+  // The names of the loaded cheats, drawn over the game picture. APF fixes menu
+  // labels at build time, so the menu can never name a cheat; the picture can.
+  //
+  // Clocked at clk_mem_85_91, not clk_sys_42_95. color_mix registers the
+  // picture, the blanking and ce_pix in that domain, so an overlay on the
+  // slower clock sees only the ce_pix pulses that happen to align with its own
+  // edges and its pixel counters never track. cheat_titles is a dual clock RAM
+  // for exactly this: the parser writes on clk_sys, the overlay reads here.
+  //
+  // Injected before the linebuffer, in the core's own pixel space. The panel is
+  // 156x144 and the narrowest mode is 256x224, so it fits every mode without
+  // the overlay knowing which one is running. Note that the wider raster is
+  // still not free: see the text_col width comment in cheat_osd.sv, where a
+  // counter sized for the Game Boy wrapped mid-line and drew the panel twice.
+  wire       osd_active, osd_ink;
+  wire [4:0] osd_title_group, osd_title_col;
+  wire [5:0] osd_title_char, osd_font_ch;
+  wire [4:0] osd_title_len;
+  wire [2:0] osd_font_row;
+  wire [7:0] osd_font_bits;
+
+  wire osd_de = ~h_blank & ~v_blank;
+
+  cheat_titles titles (
+      .wr_clk  (clk_sys_42_95),
+      .wr_reset(cheat_reset),
+      .wr_en   (cheat_desc_wr),
+      .wr_group(cheat_desc_group),
+      .wr_col  (cheat_desc_col),
+      .wr_char (cheat_desc_char),
+      .wr_end  (cheat_desc_end),
+      .rd_clk  (clk_mem_85_91),
+      .rd_group(osd_title_group),
+      .rd_col  (osd_title_col),
+      .rd_char (osd_title_char),
+      .rd_len  (osd_title_len)
+  );
+
+  cheat_font font (
+      .ch  (osd_font_ch),
+      .row (osd_font_row),
+      .bits(osd_font_bits)
+  );
+
+  cheat_osd osd (
+      .clk    (clk_mem_85_91),
+      .reset  (~reset_n),
+      .show   (show_cheats_v),
+      .ce_pix (ce_pix),
+      .de     (osd_de),
+      .v_blank(v_blank),
+
+      .title_count(cheat_title_count),
+      .code_count (cheat_code_total),
+
+      .title_group(osd_title_group),
+      .title_col  (osd_title_col),
+      .title_char (osd_title_char),
+      .title_len  (osd_title_len),
+
+      .font_ch  (osd_font_ch),
+      .font_row (osd_font_row),
+      .font_bits(osd_font_bits),
+
+      .active(osd_active),
+      .ink   (osd_ink)
+  );
+
+  // Ink white, panel background black. Drawn over the picture rather than
+  // blended, so the text stays readable on any background the game puts up.
+  wire [23:0] vid_rgb_osd = osd_active ? (osd_ink ? 24'hFFFFFF : 24'h000000)
+                                       : vid_rgb_core;
+
   linebuffer linebuffer (
       .clk_vid(clk_sys_42_95),
 
@@ -851,7 +1063,7 @@ module core_top (
 
       .ce_pix(ce_pix),
       .disable_pix(border),
-      .rgb_in(vid_rgb_core),
+      .rgb_in(vid_rgb_osd),
 
       .vsync_out(video_vs),
       .hsync_out(video_hs),

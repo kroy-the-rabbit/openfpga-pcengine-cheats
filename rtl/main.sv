@@ -59,6 +59,11 @@ module pce (
     input wire p4_dpad_right,
 
     input wire sgx,
+    // US TurboChips wire D0-D7 in the opposite order to Japanese HuCards, so a
+    // dump taken with the wrong orientation is bit-reversed within each byte.
+    // MiSTer exposes this as an OSD toggle; the Pocket port had the logic but
+    // hardwired its selector to zero. Sampled at load time only.
+    input wire swap_bits,
 
     // Settings
     input wire turbo_tap_enable,
@@ -69,6 +74,19 @@ module pce (
     input wire overscan_enable,
     input wire extra_sprites_enable,
     input wire raw_rgb_enable,
+
+    // Master cheat switch. The poker is idle with this clear, so a build with
+    // cheats present still boots exactly like one without.
+    input wire cheats_enabled,
+    // Diagnostic: sweeps work RAM with a constant. See cheat_poker.sv.
+    input wire cheat_busy,   // a .cht file is loading, table is in flux
+
+    // Cheat table load port, from cheat_loader in core_top.
+    input wire        cheat_code_wr,
+    input wire  [4:0] cheat_code_index,
+    input wire [12:0] cheat_code_addr,
+    input wire  [7:0] cheat_code_data,
+    input wire  [5:0] cheat_code_total,
 
     input wire mb128_enable,
 
@@ -140,7 +158,8 @@ module pce (
   // wire code_index      = &ioctl_index;
   // wire code_download   = ioctl_download & code_index;
   // wire cart_download   = ioctl_download & (ioctl_index[5:0] <= 6'h01);
-  // wire cd_dat_download = ioctl_download & (ioctl_index[5:0] == 6'h02);
+  // wire cd_data_download = ioctl_download & (ioctl_index[5:0] == 6'h02);
+  // wire cd_audio_download = ioctl_download & (ioctl_index[5:0] == 6'h03);
 
   wire overscan = ~status[17];
 
@@ -148,6 +167,7 @@ module pce (
   wire                                                                  cd_comm_send;
   reg                                        [15:0]                     cd_stat;
   reg                                                                   cd_stat_rec;
+  // reg                                                                   cd_int_rec;
   reg                                                                   cd_dataout_req;
   wire                                       [79:0]                     cd_dataout;
   wire                                                                  cd_dataout_send;
@@ -162,7 +182,11 @@ module pce (
 
   wire [15:0] cdda_sl, cdda_sr, adpcm_s, psg_sl, psg_sr;
 
-  pce_top #(LITE) pce_top (
+  wire        poke_wr;
+  wire [12:0] poke_addr;
+  wire  [7:0] poke_data;
+
+  pce_top #(LITE, SGX_EN) pce_top (
       .RESET(reset | cart_download),
       .COLD_RESET(cart_download),
 
@@ -182,13 +206,17 @@ module pce (
       .BRM_DI(bram_data),
       .BRM_WE(bram_wr),
 
+      .POKE_A(poke_addr),
+      .POKE_D(poke_data),
+      .POKE_WE(poke_wr),
+
       .GG_EN(status[5]),
       .GG_CODE(gg_code),
       .GG_RESET((cart_download | code_download) & ioctl_wr & !ioctl_addr),
       .GG_AVAIL(gg_avail),
 
       .SP64(extra_sprites_enable),
-      .SGX (sgx && !LITE),
+      .SGX (sgx && SGX_EN != 0),
 
       .JOY_OUT(joy_out),
       .JOY_IN (joy_in),
@@ -218,7 +246,8 @@ module pce (
       // .CD_RESET (cd_reset_req),
 
       // .CD_DATA(!cd_dat_byte ? cd_dat[7:0] : cd_dat[15:8]),
-      // .CD_WR(cd_wr),
+      // .CD_DATA_WR(cd_data_wr),
+      // .CD_AUDIO_WR(cd_audio_wr),
       // .CD_DATA_END(cd_dat_req),
       // .CD_DM(cd_dm),
 
@@ -249,6 +278,33 @@ module pce (
       .BORDER_OUT(border)
   );
 
+  // Cheats. Every published PC Engine code is a work RAM poke, so this is the
+  // whole cheat path rather than a companion to the read override.
+  //
+  // Codes come from the .cht file in data slot 2, parsed by cheat_loader in
+  // core_top. Enable state comes from the file too, not from the menu: APF
+  // fixes menu labels at build time, so a per-cheat checkbox could only ever
+  // say "Cheat 1".
+  cheat_poker #(
+      .MAX_CODES(32),
+      .INDEX_W  (5)
+  ) cheat_poker (
+      .clk       (clk_sys_42_95),
+      .reset     (reset | cart_download),
+      .enable    (cheats_enabled),
+      .vblank    (vbl),
+      .blocked   (cart_download | cheat_busy),
+      .code_wr   (cheat_code_wr),
+      .code_index(cheat_code_index),
+      .code_addr (cheat_code_addr),
+      .code_data (cheat_code_data),
+      .code_total(cheat_code_total),
+
+      .poke_wr  (poke_wr),
+      .poke_addr(poke_addr),
+      .poke_data(poke_data)
+  );
+
   // CD communication
 
   // wire  [35:0] EXT_BUS;
@@ -268,7 +324,7 @@ module pce (
   // 	if(cart_download) cd_en <= 0;
   // end
 
-  // reg        cd_dat_req;
+  // reg         cd_dat_req;
   // always @(posedge clk_sys) begin
   // 	reg cd_out112_last = 1;
   // 	reg cd_comm_send_old = 0, cd_dataout_send_old = 0, cd_dat_req_old = 0, cd_reset_req_old = 0;
@@ -281,11 +337,10 @@ module pce (
   // 	else begin
   // 		if (cd_out[112] != cd_out112_last) begin
   // 			cd_out112_last <= cd_out[112];
-
-  // 			cd_stat <= cd_out[15:0];
-  // 			cd_stat_rec <= ~cd_out[16];
-  // 			cd_dataout_req <= cd_out[16];
-  // 			cd_region <= cd_out[17];
+  //                    cd_stat <= cd_out[15:0];
+  //                    cd_stat_rec <= ~cd_out[16];
+  //                    cd_dataout_req <= cd_out[16];
+  //                    cd_region <= cd_out[17];
   // 		end
 
   // 		cd_comm_send_old <= cd_comm_send;
@@ -314,7 +369,7 @@ module pce (
   // end
 
   reg [15:0] cd_dat = 0;
-  reg        cd_wr = 0;
+  reg        cd_data_wr,cd_audio_wr;
   reg        cd_dat_byte = 0;
   reg        cd_dm = 0;
   // always @(posedge clk_sys) begin
@@ -322,13 +377,14 @@ module pce (
   // 	reg head_pos, cd_dat_write;
   // 	reg [14:0] cd_dat_len, cd_dat_cnt;
 
-  // 	old_download <= cd_dat_download;
-  // 	if ((~old_download && cd_dat_download) || reset) begin
+
+  //	old_download <= cd_data_download | cd_audio_download;
+  //	if ((~old_download && (cd_data_download || cd_audio_download)) || reset) begin
   // 		head_pos <= 0;
   // 		cd_dat_len <= 0;
   // 		cd_dat_cnt <= 0;
   // 	end
-  // 	else if (ioctl_wr && cd_dat_download) begin
+  //	else if (ioctl_wr && (cd_data_download || cd_audio_download)) begin
   // 		if (!head_pos) begin
   // 			{cd_dm,cd_dat_len} <= ioctl_dout;
   // 			cd_dat_cnt <= 0;
@@ -342,19 +398,21 @@ module pce (
   // 	end
 
   // 	if (cd_dat_write) begin
-  // 		if (!cd_wr) begin
-  // 			cd_wr <= 1;
+  //		if (!cd_data_wr && !cd_audio_wr) begin
+  //			cd_data_wr <= cd_data_download;
+  //			cd_audio_wr <= cd_audio_download;
   // 		end
-  // 		else begin
-  // 			cd_wr <= 0;
-  // 			cd_dat_byte <= ~cd_dat_byte;
-  // 			cd_dat_cnt <= cd_dat_cnt + 15'd1;
-  // 			if (cd_dat_byte || cd_dat_cnt >= cd_dat_len-1) begin
-  // 				cd_dat_write <= 0;
+  //		else begin
+  //			cd_data_wr <= 0;
+  //			cd_audio_wr <= 0;
+  //			cd_dat_byte <= ~cd_dat_byte;
+  //			cd_dat_cnt <= cd_dat_cnt + 15'd1;
+  //			if (cd_dat_byte || cd_dat_cnt >= cd_dat_len-1) begin
+  //				cd_dat_write <= 0;
   // 			end
-  // 		end
-  // 	end
-  // end
+  //		end 
+  // 	 end
+  //end
 
   ////////////////////////////  VIDEO  ///////////////////////////////////
 
@@ -433,6 +491,9 @@ module pce (
   ////////////////////////////  MEMORY  //////////////////////////////////
 
   localparam LITE = 0;
+  // SuperGrafx off. Frees the second VDC, its VRAM and the VPC: see the SGX_EN
+  // comment in pce_top.vhd. .sgx files still load, they just render as plain PCE.
+  localparam SGX_EN = 0;
 
   wire [21:0] rom_rdaddr;
   wire [ 7:0] rom_sdata;
@@ -495,7 +556,7 @@ module pce (
 
   wire romwr_ack;
   reg [23:0] romwr_a;
-  wire [15:0] romwr_d = status[3] ?
+  wire [15:0] romwr_d = swap_bits ?
 		{ ioctl_dout[8], ioctl_dout[9], ioctl_dout[10],ioctl_dout[11],ioctl_dout[12],ioctl_dout[13],ioctl_dout[14],ioctl_dout[15],
 		  ioctl_dout[0], ioctl_dout[1], ioctl_dout[2], ioctl_dout[3], ioctl_dout[4], ioctl_dout[5], ioctl_dout[6], ioctl_dout[7] }
 		: ioctl_dout;
@@ -703,10 +764,13 @@ module pce (
 
   always @(posedge clk_sys_42_95) begin : input_block
     reg [ 1:0] last_gp;
-    reg        high_buttons;
+    reg        high_buttons = 0;
     reg [14:0] mouse_to;
     reg        ms_stb;
     reg [7:0] msr_x, msr_y;
+
+    if (reset)
+	high_buttons <= 0;
 
     joy_latch <= joy_data[{high_buttons, joy_out[0], 2'b00}+:4];
 
@@ -743,6 +807,8 @@ module pce (
         joy_latch <= 0;
         if (~last_gp[1]) high_buttons <= ~high_buttons && button6_enable;
       end
+      else
+        high_buttons <= 0;	
     end
 	else if (joy_out[0] && ~last_gp[0] && (turbo_tap_enable | status[27]) && (status[27:26] != 2'b11)) begin	// suppress if XE-1AP
       joy_port <= joy_port + 3'd1;

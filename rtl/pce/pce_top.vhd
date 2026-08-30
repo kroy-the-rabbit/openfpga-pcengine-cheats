@@ -6,7 +6,13 @@ use IEEE.STD_LOGIC_TEXTIO.all;
 
 entity pce_top is
 	generic (
-		LITE : integer := 0
+		LITE : integer := 0;
+		-- SuperGrafx. The second VDC, its 32K VRAM and the VPC that mixes the two
+		-- cost 5,441 ALMs and 68 M10Ks, which is 29% of the Pocket device's logic
+		-- and 22% of its block RAM, for one small library. This is its own generic
+		-- rather than part of LITE because LITE also gates the Game Genie block
+		-- above, which is worth keeping.
+		SGX_EN : integer := 1
 	);
 	port(
 		RESET			: in  std_logic;
@@ -25,6 +31,11 @@ entity pce_top is
 		BRM_DI 		: out std_logic_vector(7 downto 0);
 		BRM_DO 		: in  std_logic_vector(7 downto 0);
 		BRM_WE 		: out std_logic;
+
+		-- Cheat poker, writing work RAM through port B of the RAM below.
+		POKE_A		: in  std_logic_vector(12 downto 0) := (others => '0');
+		POKE_D		: in  std_logic_vector(7 downto 0) := (others => '0');
+		POKE_WE		: in  std_logic := '0';
 
 		GG_EN			: in  std_logic;
 		GG_CODE		: in  std_logic_vector(128 downto 0);
@@ -60,7 +71,8 @@ entity pce_top is
 		CD_RESET		: out std_logic;
 
 		CD_DATA		: in  std_logic_vector(7 downto 0);
-		CD_WR			: in  std_logic;
+		CD_DATA_WR	: in  std_logic;
+		CD_AUDIO_WR	: in  std_logic;
 		CD_DATA_END	: out std_logic;
 		CD_DM			: in  std_logic;
 
@@ -128,15 +140,18 @@ signal CPU_PRAM_SEL_N: std_logic;
 signal VCE_DO			: std_logic_vector(7 downto 0);
 
 -- VDC signals
-signal VDC0_DO			: std_logic_vector(7 downto 0);
+signal VDC0_DO			: std_logic_vector(15 downto 0);		-- only lower 8 bits are used in 8-bit mode
+alias  VDC0_DO_LO		: std_logic_vector(7 downto 0) is VDC0_DO(7 downto 0);
 signal VDC0_BUSY_N	: std_logic;
 signal VDC0_IRQ_N		: std_logic;
 signal VDC0_COLNO		: std_logic_vector(8 downto 0);
-signal VDC1_DO			: std_logic_vector(7 downto 0);
+signal VDC1_DO			: std_logic_vector(15 downto 0);		-- only lower 8 bits are used in 8-bit mode
+alias  VDC1_DO_LO		: std_logic_vector(7 downto 0) is VDC1_DO(7 downto 0);
 signal VDC1_BUSY_N	: std_logic;
 signal VDC1_IRQ_N		: std_logic;
 signal VDC1_COLNO		: std_logic_vector(8 downto 0);
 signal VDC_CLKEN		: std_logic;
+signal VDC_CLKEN_F	: std_logic;
 signal VPC_DO			: std_logic_vector(7 downto 0);
 signal VDCNUM    		: std_logic;
 signal VDC_COLNO		: std_logic_vector(8 downto 0);
@@ -192,6 +207,9 @@ signal VRAM1_DO	: std_logic_vector(15 downto 0);
 signal VRAM1_WE	: std_logic;
 signal CLR_A	   : std_logic_vector(14 downto 0);
 signal CLR_WE		: std_logic;
+signal RAM_B_A		: std_logic_vector(14 downto 0);
+signal RAM_B_D		: std_logic_vector(7 downto 0);
+signal RAM_B_WE	: std_logic;
 signal VDC0_BORDER: std_logic;
 signal VDC0_GRID	: std_logic_vector(1 downto 0);
 signal CPU_PRE_RD	: std_logic;
@@ -322,6 +340,7 @@ port map(
 	-- VDC Interface
 	COLNO		=> VDC_COLNO,
 	CLKEN		=> VDC_CLKEN,
+	CLKEN_F  => VDC_CLKEN_F,
 	HSYNC_F	=> VCE_HSYNC_F,
 	HSYNC_R	=> VCE_HSYNC_R,
 	VSYNC_F	=> VCE_VSYNC_F,
@@ -353,17 +372,19 @@ port map(
 
 	-- CPU Interface
 	CPU_CE	=> CPU_CE,
+	BYTEWORD => '1',						-- 8-bit access
 	A			=> CPU_A(1 downto 0),
 	CS_N		=> CPU_VDC0_SEL_N,
 	WR_N		=> CPU_WR_N,
 	RD_N		=> CPU_RD_N,
-	DI			=> CPU_DO,
+	DI			=> "00000000" & CPU_DO,
 	DO 		=> VDC0_DO,
 	BUSY_N	=> VDC0_BUSY_N,
 	IRQ_N		=> VDC0_IRQ_N,
 
 	-- VCE Interface
 	DCK_CE	=> VDC_CLKEN,
+	DCK_CE_F => VDC_CLKEN_F,
 	HSYNC_F	=> VCE_HSYNC_F,
 	HSYNC_R	=> VCE_HSYNC_R,
 	VSYNC_F	=> VCE_VSYNC_F,
@@ -400,7 +421,7 @@ port map (
 CLR_A  <= CLR_A + 1  when rising_edge(CLK);
 CLR_WE <= COLD_RESET when rising_edge(CLK);
 
-generate_SGX: if (LITE = 0) generate begin
+generate_SGX: if (SGX_EN /= 0) generate begin
 
 	VDC1 : entity work.HUC6270
 	port map(
@@ -410,17 +431,19 @@ generate_SGX: if (LITE = 0) generate begin
 
 		-- CPU Interface
 		CPU_CE	=> CPU_CE,
+		BYTEWORD => '1',						-- 8-bit access
 		A			=> CPU_A(1 downto 0),
 		CS_N		=> CPU_VDC1_SEL_N,
 		WR_N		=> CPU_WR_N,
 		RD_N		=> CPU_RD_N,
-		DI			=> CPU_DO,
+		DI			=> "00000000" & CPU_DO,
 		DO 		=> VDC1_DO,
 		BUSY_N	=> VDC1_BUSY_N,
 		IRQ_N		=> VDC1_IRQ_N,
 
 		-- VCE Interface
 		DCK_CE	=> VDC_CLKEN,
+		DCK_CE_F => VDC_CLKEN_F,
 		HSYNC_F	=> VCE_HSYNC_F,
 		HSYNC_R	=> VCE_HSYNC_R,
 		VSYNC_F	=> VCE_VSYNC_F,
@@ -491,7 +514,7 @@ generate_SGX: if (LITE = 0) generate begin
 
 end generate;
 
-generate_NOSGX: if (LITE /= 0) generate begin
+generate_NOSGX: if (SGX_EN = 0) generate begin
 
 	CPU_VDC0_SEL_N <= CPU_VDC_SEL_N;
 	CPU_VDC1_SEL_N <= '1';
@@ -515,17 +538,17 @@ CPU_BRM_SEL_N <= '0' when CPU_A(20 downto 11) = x"F7"&"00" and CD_BRAM_EN = '1' 
 CPU_ROM_SEL_N <= CPU_A(20);
 
 -- CPU data bus
-CPU_DI <= RAM_DO        when CPU_RAM_SEL_N  = '0'
-			else CD_DO     when CD_SEL_N       = '0'
-			else CD_RAM_DI when CD_RAM_CS_N    = '0' or AC_RAM_CS_N = '0'
-			else AC_DO     when AC_SEL_N       = '0'
-			else BRM_DO    when CPU_BRM_SEL_N  = '0'
-			else PRAM_DO   when CPU_PRAM_SEL_N = '0'
-			else ROM_DO    when CPU_ROM_SEL_N  = '0'
-			else VCE_DO    when CPU_VCE_SEL_N  = '0'
-			else VDC0_DO   when CPU_VDC0_SEL_N = '0'
-			else VDC1_DO   when CPU_VDC1_SEL_N = '0'
-			else VPC_DO    when CPU_VPC_SEL_N  = '0'
+CPU_DI <= RAM_DO         when CPU_RAM_SEL_N  = '0'
+			else CD_DO      when CD_SEL_N       = '0'
+			else CD_RAM_DI  when CD_RAM_CS_N    = '0' or AC_RAM_CS_N = '0'
+			else AC_DO      when AC_SEL_N       = '0'
+			else BRM_DO     when CPU_BRM_SEL_N  = '0'
+			else PRAM_DO    when CPU_PRAM_SEL_N = '0'
+			else ROM_DO     when CPU_ROM_SEL_N  = '0'
+			else VCE_DO     when CPU_VCE_SEL_N  = '0'
+			else VDC0_DO_LO when CPU_VDC0_SEL_N = '0'
+			else VDC1_DO_LO when CPU_VDC1_SEL_N = '0'
+			else VPC_DO     when CPU_VPC_SEL_N  = '0'
 			else X"FF";
 
 -- Perform address mangling to mimic HuCard chip mapping.
@@ -615,10 +638,21 @@ port map (
 	wren_a	=> CPU_CE and not CPU_RAM_SEL_N and not CPU_WR_N,
 	q_a		=> RAM_DO,
 
-	address_b=> CLR_A,
-	data_b	=> (others => '0'),
-	wren_b	=> CLR_WE
+	address_b=> RAM_B_A,
+	data_b	=> RAM_B_D,
+	wren_b	=> RAM_B_WE
 );
+
+-- Port B of work RAM belongs to the cold-reset clear, and the cheat poker
+-- borrows it the rest of the time. The clear always wins: it runs once per
+-- load, the poker runs once per frame, and a poke the clear swallows is
+-- reissued at the next vblank. Only the low 13 bits of the poker's address are
+-- carried, which is the 8KB at bank $F8 the CPU can actually reach here; that
+-- also leaves the upper 24KB of this 32KB block write-only and unread, which is
+-- what lets Quartus infer 8 M10Ks for it instead of 32 when SGX_EN = 0.
+RAM_B_A  <= CLR_A when CLR_WE = '1' else "00" & POKE_A;
+RAM_B_D  <= (others => '0') when CLR_WE = '1' else POKE_D;
+RAM_B_WE <= CLR_WE or POKE_WE;
 
 RAM_A(12 downto 0)  <= CPU_A(12 downto 0);
 RAM_A(14 downto 13) <= CPU_A(14 downto 13) when SGX = '1' else "00";
@@ -658,7 +692,8 @@ port map(
 	CD_DOUT_SEND=> CD_DOUT_SEND,
 	
 	CD_DATA		=> CD_DATA,
-	CD_WR			=> CD_WR,
+	CD_DATA_WR	=> CD_DATA_WR,
+	CD_AUDIO_WR	=> CD_AUDIO_WR,
 	CD_DATA_END	=> CD_DATA_END,
 	
 	CD_REGION   => CD_REGION,

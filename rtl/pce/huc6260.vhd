@@ -22,6 +22,7 @@ entity huc6260 is
 		-- VDC Interface
 		COLNO		: in std_logic_vector(8 downto 0);
 		CLKEN		: out std_logic;
+		CLKEN_F	: out std_logic;
 		HSYNC_F	: out std_logic;
 		HSYNC_R	: out std_logic;
 		VSYNC_F	: out std_logic;
@@ -100,6 +101,7 @@ signal VBL_FF, VBL_FF2	: std_logic;
 signal CLKEN_CNT	: std_logic_vector(2 downto 0);
 signal CLKEN_FS_CNT: std_logic_vector(2 downto 0);
 signal CLKEN_FF	: std_logic;
+signal CLKEN_FF_F	: std_logic;
 signal MULTIRES_FF : std_logic;
 signal MULTIRES   : std_logic;
 
@@ -199,9 +201,16 @@ begin
 end process;
 
 -- Video counting, register loading and clock generation
-process( CLK )
+process(CLK, RESET_N)
 begin
-	if rising_edge( CLK ) then
+	if RESET_N = '0' then
+		CLKEN_CNT <= (others=>'0');
+		H_CNT <= (others=>'0');
+		V_CNT <= (others=>'0');
+		CLKEN_FF <= '0';
+		MULTIRES_FF <= '0';
+		BW <= '0';
+	elsif rising_edge(CLK) then
 		H_CNT <= H_CNT + 1;
 
 		CLKEN_FF <= '0';
@@ -215,6 +224,14 @@ begin
 		elsif DOTCLOCK(1) = '1' and CLKEN_CNT = "011" and H_CNT < LINE_CLOCKS-2-1 then
 			CLKEN_CNT <= (others => '0');
 			CLKEN_FF <= '1';				
+		end if;
+		
+		if DOTCLOCK = "00" and CLKEN_CNT = "011" then
+			CLKEN_FF_F <= '1';
+		elsif DOTCLOCK = "01" and CLKEN_CNT = "010" then
+			CLKEN_FF_F <= '1';				
+		elsif DOTCLOCK(1) = '1' and CLKEN_CNT = "001" then
+			CLKEN_FF_F <= '1';				
 		end if;
 
 		if H_CNT = LINE_CLOCKS-1 then
@@ -246,12 +263,12 @@ begin
 	end if;
 end process;
 
-HSYNC_START_POS <= 32-1 when DOTCLOCK = "00" else 
-                   66-1 when DOTCLOCK = "01" else 
-                   LINE_CLOCKS-1;
-HSYNC_END_POS   <= 32+464-1 when DOTCLOCK = "00" else 
-                   66+468-1 when DOTCLOCK = "01" else 
-                   468-1;
+HSYNC_START_POS <= 8-1 when DOTCLOCK = "00" else 
+                   LINE_CLOCKS-6-1 when DOTCLOCK = "01" else 
+                   LINE_CLOCKS-26-1;
+HSYNC_END_POS   <= 8+464-1 when DOTCLOCK = "00" else 
+                   468-6-1 when DOTCLOCK = "01" else 
+                   468-26-1;
 process( CLK )
 begin
 	if rising_edge( CLK ) then
@@ -260,15 +277,19 @@ begin
 		VSYNC_F <= '0';
 		VSYNC_R <= '0';
 		if H_CNT = HSYNC_START_POS then HSYNC_F <= '1'; end if;
+		if H_CNT = HSYNC_START_POS + 1 and DOTCLOCK = "01" then HSYNC_F <= '1'; end if;
 		if H_CNT = HSYNC_END_POS   then HSYNC_R <= '1'; end if;
 		if V_CNT = END_LINE-1    and H_CNT = LINE_CLOCKS-1 then VSYNC_F <= '1'; end if;
 		if V_CNT = VS_LINES-1    and H_CNT = LINE_CLOCKS-1 then VSYNC_R <= '1'; end if;
 	end if;
 end process;
 
-process( CLK )
+process(CLK, RESET_N)
 begin
-	if rising_edge( CLK ) then
+	if RESET_N = '0' then
+		CLKEN_FS_CNT <= (others=>'0');
+		CLKEN_FS <= '0';
+	elsif rising_edge(CLK) then
 		CLKEN_FS <= '0';
 		CLKEN_FS_CNT <= CLKEN_FS_CNT + 1;
 		if (MULTIRES = '1' or DOTCLOCK(1) = '1') and CLKEN_FS_CNT = "011" and H_CNT < LINE_CLOCKS-2-1 then
@@ -361,5 +382,6 @@ begin
 end process;
 
 CLKEN <= CLKEN_FF;
+CLKEN_F <= CLKEN_FF_F;
 
 end rtl;

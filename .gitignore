@@ -51,3 +51,6 @@ cr_ie_info.json
 # Gateman directories and files
 !.gateman/*
 !gateware.json
+
+# Local build harness output
+/build/

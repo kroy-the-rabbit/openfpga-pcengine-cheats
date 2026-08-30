@@ -1,0 +1,7 @@
+codes=3 titles=3
+    [ 0] 1f0381 : 03
+    [ 1] 1f037d : 02
+    [ 2] 1f1310 : 02
+    title[0] = INFINITE BOMBS
+    title[1] = INFINITE LIVES
+    title[2] = INVINCIBILITY

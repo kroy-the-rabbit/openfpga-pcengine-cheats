@@ -1,0 +1,63 @@
+# Build and measurement harness for the Pocket PC Engine core.
+#
+# Quartus, containerised (see tools/podman/README.md):
+#
+#   make pce                    build -> build/pce/{report.txt,build.log,work/}
+#   make pce BUILD_NAME=foo     build into build/foo/ instead (compare two trees)
+#   make pce NO_SIGNALTAP=1     build without the qsf's SignalTap instrumentation
+#   make pce SEED=2             re-run the fitter with a different placement seed
+#   make pce SKIP_COMPILE=1     re-report existing outputs (no Quartus run)
+#   make dist                   package a flashable core -> build/pce/dist/
+#   make dist BUILD_NAME=foo    package build/foo instead
+#                               also writes a release zip you can unpack onto
+#                               the SD card root
+#   make report                 regenerate build/pce/report.txt from existing outputs
+#   make shell                  interactive shell in the Quartus container
+#   make compare A=pce B=vanfanel   resource and timing delta between two builds
+#   make clean                  remove build/
+#
+# CI runs the same build.sh with Quartus installed on the runner instead of in
+# the container, so a release build and a local one are the same build. See
+# .github/workflows/release.yml.
+#
+#   tools/cheats/check-manifests.sh   APF limits the Pocket enforces silently
+#   tools/cheats/run-fixtures.sh      .cht parser against known cases
+
+PODMAN  ?= podman
+# Repeatable timing closure. AUTO FIT, which the qsf asks for, lowers effort as
+# soon as it believes timing is achievable, and on this design the worst hold
+# path has about a tenth of a nanosecond of margin. At the same seed, AUTO FIT
+# landed it at -0.025 ns and STANDARD FIT at +0.109 ns. Override with an empty
+# value to build the way upstream does. See docs/BASELINE.md.
+FITTER_EFFORT ?= STANDARD FIT
+IMAGE   ?= localhost/pocket-quartus:25.1std
+REV     ?= pce_pocket
+HARNESS := tools/podman
+
+.PHONY: pce dist report compare shell clean test
+
+pce:
+	PODMAN=$(PODMAN) IMAGE=$(IMAGE) REV=$(REV) SEED=$(SEED) BUILD_NAME=$(BUILD_NAME) \
+	SKIP_COMPILE=$(SKIP_COMPILE) NO_SIGNALTAP=$(NO_SIGNALTAP) \
+	FITTER_EFFORT="$(FITTER_EFFORT)" NPROC="$(NPROC)" \
+	STRICT_TIMING=$(STRICT_TIMING) $(HARNESS)/build.sh
+
+dist:
+	REV=$(REV) BUILD_NAME=$(BUILD_NAME) $(HARNESS)/dist.sh
+
+test:
+	tools/cheats/check-manifests.sh
+	tools/cheats/run-fixtures.sh "$(CHT_DB)"
+
+report:
+	REV=$(REV) BUILD_NAME=$(BUILD_NAME) $(HARNESS)/report.sh
+
+shell:
+	$(PODMAN) run --rm -it --userns=keep-id --security-opt label=disable \
+		-v "$(CURDIR)/build/$(or $(BUILD_NAME),pce)/work:/work" -w /work/projects -e HOME=/tmp $(IMAGE) bash
+
+clean:
+	rm -rf build
+
+compare:
+	REV=$(REV) $(HARNESS)/compare.sh $(A) $(B)

@@ -11,6 +11,28 @@
         "value": 1
       },
       {
+        "name": "Cheats enabled",
+        "id": 81,
+        "type": "check",
+        "enabled": true,
+        "address": "0x00000404",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 0,
+        "value": 1
+      },
+      {
+        "name": "Show cheats",
+        "id": 82,
+        "type": "check",
+        "enabled": true,
+        "address": "0x00000408",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 0,
+        "value": 1
+      },
+      {
         "name": "Use Turbo Tap",
         "id": 20,
         "type": "check",
@@ -116,6 +138,17 @@
         "type": "check",
         "enabled": true,
         "address": "0x00000304",
+        "persist": true,
+        "writeonly": true,
+        "defaultval": 0,
+        "value": 1
+      },
+      {
+        "name": "Swap ROM Bit Order",
+        "id": 80,
+        "type": "check",
+        "enabled": true,
+        "address": "0x00000400",
         "persist": true,
         "writeonly": true,
         "defaultval": 0,
