@@ -34,13 +34,41 @@ they need.
 > your copy overwrites whatever is there, and the damage is written into your
 > save the next time the game saves. Back up anything you care about first.
 
-## SuperGrafx is off in this build
+## SuperGrafx is the price of the cheat engine
 
-`SGX_EN` is 0. That frees the second VDC, its VRAM and the VPC, which is what
-the cheat engine is built out of. SuperGrafx games will not run correctly here.
+`SGX_EN` is 0, which frees the second VDC, its VRAM and the VPC. That is the
+room the cheat engine is built out of, and it is why the design sits near 50 %
+logic and block RAM with the engine in it rather than against the ceiling.
+`docs/BASELINE.md` has the measurements.
 
-If you want SuperGrafx, run agg23's core. The two install side by side and this
-one does not replace it.
+A SuperGrafx game will not run correctly on a core that no longer has the
+hardware, so `.sgx` is not offered rather than offered and broken. If you want
+SuperGrafx, run agg23's core: the two install side by side and this one does not
+replace it.
+
+## PC Engine CD is being researched
+
+Not supported today, and not abandoned either.
+
+The CD RTL is inherited and compiles in every build, `rtl/pce/cd/`: `cd.vhd`,
+`SCSI.vhd`, `SCSI_FIFO.vhd`, `CDDA_FIFO.vhd` and `MSM5205.vhd`. It costs zero
+logic because it is held disabled rather than deleted, in three places:
+`pce_top.vhd` passes `EN => '0'`, `main.sv` has `cd_en` tied low with its
+assignments commented out, and the CD lines around it are commented too. MiSTer
+passes `EN => '1'` at that same point; agg23 changed it when porting.
+
+What makes it a project rather than a switch is that MiSTer's CD block expects
+a host processor running Linux to parse the cue sheet, seek the image and feed
+it sectors, and the Pocket has none.
+[Mazamars312/openfpga-pcengine-cd](https://github.com/Mazamars312/openfpga-pcengine-cd)
+is the core that closed that gap, and its manifest shows the cost: deferred cue
+and bin slots, APF `version_required 2.3` against this core's `1.1`, a System
+Card BIOS the user supplies, and a 64 KB soft MPU standing in for the host.
+
+The open question is which side to build from. Adding cheats to a core that
+already does CD is almost certainly cheaper than adding CD to a core that
+already does cheats, because the CD subsystem is the expensive half and it
+already exists there. `docs/PLAN.md` §7a records the finding and the date.
 
 ## What works
 
@@ -53,8 +81,8 @@ one does not replace it.
 | Six-button controllers | **works**, upstream's |
 | Controller turbo | **works**, upstream's |
 | Per-game memory cards | **works**, upstream's |
-| SuperGrafx | **off**, see above |
-| PC Engine CD | not supported, and not by upstream either |
+| SuperGrafx | **off**, and that is what the cheat engine is built out of. See above |
+| PC Engine CD | not supported. The RTL is inherited and held disabled; see above for what it would take |
 | Cartridges | not supported |
 | **Show cheats**, the on-screen list of enabled cheats | **works** |
 | A code store meter | not built. The store holds 32 codes, `MAX_CODES` in `cheat_poker.sv` and `cheat_loader.sv`, and the loader stops committing at it, but nothing shows how full it is |
