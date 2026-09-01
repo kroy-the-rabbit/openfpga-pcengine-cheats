@@ -317,6 +317,10 @@ module core_top (
       32'h2xxxxxxx: begin
         bridge_rd_data <= sd_read_data;
       end
+      // The open_dataslot_file_t struct, which the host reads back out of us.
+      32'h61xxxxxx: begin
+        bridge_rd_data <= path_rd_data;
+      end
       32'hF8xxxxxx: begin
         bridge_rd_data <= cmd_bridge_rd_data;
       end
@@ -374,6 +378,16 @@ module core_top (
         32'h408: begin
           show_cheats <= bridge_wr_data[0];
         end
+        // CD read probe, docs/CD-PLAN.md P0
+        32'h40C: begin
+          probe_start <= bridge_wr_data[0];
+        end
+        32'h410: begin
+          probe_chunk <= bridge_wr_data[1:0];
+        end
+        32'h414: begin
+          path_start <= bridge_wr_data[0];
+        end
         // 32'h200: begin
         //   mb128_enable <= bridge_wr_data[0];
         // end
@@ -427,6 +441,153 @@ module core_top (
   // bridge target commands
   // synchronous to clk_74a
 
+  // Set to 0 to take the SD read probe out of the build entirely: the module,
+  // the target command traffic it generates and the overlay row that prints
+  // its answer all fold away, because probe_read stops being driven and
+  // cheat_osd's DIAG branch loses its inputs. This has to be 0 before anything
+  // is released. See docs/CD-PLAN.md P0.
+  localparam CD_PROBE = 1;
+
+  wire         probe_req, path_req;
+  wire [ 15:0] probe_cmd, path_cmd;
+  wire [ 31:0] probe_p0, probe_p1, probe_p2, probe_p3;
+  wire [ 31:0] path_p0, path_p1, path_p2, path_p3;
+  wire [155:0] probe_line, path_line;
+  wire         probe_valid, path_valid;
+  wire [ 31:0] path_rd_data;
+
+  wire         tcmd_ack, tcmd_done;
+  wire [ 15:0] tcmd_result;
+
+  // The two diagnostics share one target command port. Ownership is latched
+  // rather than taken from the live request lines, because a requester drops
+  // its request the moment it is acknowledged: a plain `path_req ? ... :`
+  // arbiter would hand the path probe's completion to the throughput probe,
+  // which would read it as a request it never made finishing instantly.
+  //
+  // core_bridge_cmd holds ack up for the whole transaction, so ack low means
+  // idle, and sel_path tracks the request lines only while idle and freezes
+  // for the duration. The loser keeps its request asserted and wins the next
+  // one. Priority while idle goes to the path probe, arbitrarily; they are
+  // separate menu switches and are not expected to run together.
+  reg sel_path = 0;
+  always @(posedge clk_74a) begin
+    if (!tcmd_ack) sel_path <= path_req;
+  end
+
+  // The request is taken through the same select as the parameters, not ORed
+  // past it. sel_path is a register, so it settles a cycle after a requester
+  // raises its request; with `path_req | probe_req` here, core_bridge_cmd
+  // accepts that first cycle and latches the parameters of whichever module
+  // sel_path was still pointing at. The path probe's very first command went
+  // out as the throughput probe's 0x0180 with four zero parameters, which
+  // returned 0, so the path probe recorded a successful 0x0190 and then read
+  // an untouched buffer: G0 with L000 and a malformed path from 0x0192. A
+  // false pass, which is worse than a failure.
+  //
+  // Selecting the request too means an unsettled cycle presents the idle
+  // module's request, which is low, so nothing is issued until the select
+  // agrees with the requester. It costs one cycle and cannot misissue.
+  wire         tcmd_req = sel_path ? path_req : probe_req;
+  wire [ 15:0] tcmd     = sel_path ? path_cmd : probe_cmd;
+  wire [ 31:0] tcmd_p0  = sel_path ? path_p0 : probe_p0;
+  wire [ 31:0] tcmd_p1  = sel_path ? path_p1 : probe_p1;
+  wire [ 31:0] tcmd_p2  = sel_path ? path_p2 : probe_p2;
+  wire [ 31:0] tcmd_p3  = sel_path ? path_p3 : probe_p3;
+
+  generate
+    if (CD_PROBE) begin : g_probe
+      dataslot_probe probe (
+          .clk  (clk_74a),
+          .reset(~pll_core_locked),
+
+          .start    (probe_start),
+          .chunk_sel(probe_chunk),
+
+          .bridge_addr(bridge_addr),
+          .bridge_wr  (bridge_wr),
+
+          .cmd_req   (probe_req),
+          .cmd       (probe_cmd),
+          .cmd_p0    (probe_p0),
+          .cmd_p1    (probe_p1),
+          .cmd_p2    (probe_p2),
+          .cmd_p3    (probe_p3),
+          .cmd_ack   (tcmd_ack & ~sel_path),
+          .cmd_done  (tcmd_done & ~sel_path),
+          .cmd_result(tcmd_result),
+
+          .line (probe_line),
+          .valid(probe_valid)
+      );
+
+      dataslot_path path (
+          .clk  (clk_74a),
+          .reset(~pll_core_locked),
+
+          .start(path_start),
+
+          .bridge_addr   (bridge_addr),
+          .bridge_wr     (bridge_wr),
+          .bridge_wr_data(bridge_wr_data),
+          .bridge_rd     (bridge_rd),
+          .bridge_rd_data(path_rd_data),
+
+          .cmd_req   (path_req),
+          .cmd       (path_cmd),
+          .cmd_p0    (path_p0),
+          .cmd_p1    (path_p1),
+          .cmd_p2    (path_p2),
+          .cmd_p3    (path_p3),
+          .cmd_ack   (tcmd_ack & sel_path),
+          .cmd_done  (tcmd_done & sel_path),
+          .cmd_result(tcmd_result),
+
+          .line (path_line),
+          .valid(path_valid)
+      );
+    end else begin : g_no_probe
+      assign probe_req    = 0;
+      assign probe_cmd    = 0;
+      assign probe_p0     = 0;
+      assign probe_p1     = 0;
+      assign probe_p2     = 0;
+      assign probe_p3     = 0;
+      assign probe_line   = 0;
+      assign probe_valid  = 0;
+      assign path_req     = 0;
+      assign path_cmd     = 0;
+      assign path_p0      = 0;
+      assign path_p1      = 0;
+      assign path_p2      = 0;
+      assign path_p3      = 0;
+      assign path_line    = 0;
+      assign path_valid   = 0;
+      assign path_rd_data = 0;
+    end
+  endgenerate
+
+  // Whichever diagnostic last produced an answer. The path probe wins while it
+  // is running so that starting it clears the throughput line rather than
+  // leaving a stale number on screen next to fresh result codes.
+  wire [155:0] diag_line_sel = (path_valid | path_start) ? path_line : probe_line;
+  wire         diag_valid_sel = (path_valid | path_start) ? path_valid : probe_valid;
+
+  // Into the overlay's clock. Not a proper multi-bit crossing and does not
+  // need to be: a diagnostic finishes its counters a cycle before it sets
+  // valid and then holds them until the next run clears it, so the data has
+  // already settled by the time valid works its way through the same three
+  // stages.
+  wire         diag_valid_v;
+  wire [155:0] diag_line_v;
+
+  synch_3 #(
+      .WIDTH(157)
+  ) diag_s (
+      {diag_valid_sel, diag_line_sel},
+      {diag_valid_v, diag_line_v},
+      clk_mem_85_91
+  );
 
   // bridge data slot access
 
@@ -462,6 +623,16 @@ module core_top (
       .dataslot_requestwrite_ok (dataslot_requestwrite_ok),
 
       .dataslot_allcomplete(dataslot_allcomplete),
+
+      .target_cmd_req   (tcmd_req),
+      .target_cmd       (tcmd),
+      .target_cmd_p0    (tcmd_p0),
+      .target_cmd_p1    (tcmd_p1),
+      .target_cmd_p2    (tcmd_p2),
+      .target_cmd_p3    (tcmd_p3),
+      .target_cmd_ack   (tcmd_ack),
+      .target_cmd_done  (tcmd_done),
+      .target_cmd_result(tcmd_result),
 
       .savestate_supported  (savestate_supported),
       .savestate_addr       (savestate_addr),
@@ -780,6 +951,14 @@ module core_top (
 
   reg [31:0] reset_delay = 0;
 
+  // The menu switch that runs the SD read probe. Held rather than pulsed: the
+  // probe edge-detects it, and clearing it releases the result. probe_chunk
+  // picks the request size, so one build sweeps all three. See CD_PROBE and
+  // docs/CD-PLAN.md P0.
+  reg probe_start = 0;
+  reg [1:0] probe_chunk = 0;
+  reg path_start = 0;
+
   // Sync
 
   wire turbo_tap_enable_s;
@@ -1026,7 +1205,9 @@ module core_top (
       .bits(osd_font_bits)
   );
 
-  cheat_osd osd (
+  cheat_osd #(
+      .DIAG(CD_PROBE)
+  ) osd (
       .clk    (clk_mem_85_91),
       .reset  (~reset_n),
       .show   (show_cheats_v),
@@ -1036,6 +1217,9 @@ module core_top (
 
       .title_count(cheat_title_count),
       .code_count (cheat_code_total),
+
+      .diag_valid(diag_valid_v),
+      .diag_line (diag_line_v),
 
       .title_group(osd_title_group),
       .title_col  (osd_title_col),

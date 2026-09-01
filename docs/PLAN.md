@@ -134,8 +134,9 @@ All six files come from `~/Desktop/repos/pocket-gbc/src/gb/`.
 
 ### Hook points in this repo
 
-* **Cheat file delivery.** `data.json` declares only slot 0 (Cartridge,
-  `.pce`/`.sgx`) and slot 1 (Save). Add a Cheats slot, mirroring GBC's:
+* **Cheat file delivery.** `data.json` declared only slot 0 (Cartridge,
+  `.pce`/`.sgx`) and slot 1 (Save) when this was written; it now also carries
+  2 (Cheats), 100 and 101 for the CD work. Add a Cheats slot, mirroring GBC's:
   `parameters "0x205"`, extensions `["cht","txt"]`, `size_maximum 0x100000`.
   Pick a bridge address that does not collide; GBC learned this the hard way and
   ended up at `0x50000000`.
@@ -145,8 +146,9 @@ All six files come from `~/Desktop/repos/pocket-gbc/src/gb/`.
   `0x0, 0x4, 0x8, 0x50, 0x100-0x10C, 0x200-0x208, 0x300-0x308`. **`0x400+` is
   free.** Note this core does *not* use the `0xF0000000` scheme the GBC core
   does, so GBC's addresses do not transfer.
-* **Menu.** `interact.json` holds **10 variables and APF allows 16**, so 6 are
-  free. An earlier draft said 12 and 4; that counted the nested option labels
+* **Menu.** `interact.json` held **10 variables against APF's limit of 16** when
+  this was written. It now holds 15, so 1 is free, and three of those are the
+  CD diagnostics P6 has to strip. An earlier draft said 12 and 4; that counted the nested option labels
   inside the audio dropdowns, which are not menu entries. GBC needs 2 ("Cheats
   enabled", "Show cheats"), and "Swap ROM Bit Order" now takes a third. Fits,
   with room for a parsed-count readout.
@@ -259,7 +261,12 @@ P4 is useful without it.
 
 ### 7a. CD-ROM² / disc images
 
-Decided 2026-08-25: not now.
+Decided 2026-08-25: not now. **Reversed 2026-08-30. This section is history;
+`docs/CD-PLAN.md` supersedes it.** What follows is left as written because the
+reasoning about why CD is hard is still correct, and only the conclusion moved.
+Two of its findings have since been overturned by measurement: the framework
+version below is now this core's own, and the closing recommendation to build
+from Mazamars312's side was dropped once the transport was measured.
 
 The RTL is all present and compiled every build (`rtl/pce/cd/`: `cd.vhd`,
 `SCSI.vhd`, `SCSI_FIFO.vhd`, `CDDA_FIFO.vhd`, `MSM5205.vhd`) and produces zero
@@ -314,7 +321,7 @@ HuCards, which the Analogue adapter does support.
 | **P3** | `interact.json` master switch, enables from the file. | **Done.** Menu matches the deployed GB/GBC core: `Cheats enabled` (`0x404`) and `Show cheats` (`0x408`), both off by default. The parsed-count readout was dropped rather than built; nothing needs it. |
 | **P4** | ~~Reconnect the Game Genie read override.~~ **Cut.** Nothing in the corpus needs it and unwired it costs 0 ALMs. Revisit only if a ROM-patch code appears. | n/a |
 | **P5 (stretch)** | `cheat_osd.sv` + font + titles, with §6 resolved. | **Done**, shipped in v0.2.4. All three modules are built by `rtl/pce.qip` and wired in `target/pocket/core_top.v`. §6 is resolved by clocking the panel at `clk_mem_85_91` and insetting it by `COL0`/`ROW0` cells instead of drawing from pixel 0, which is what the hardware overscan observation required. |
-| **P6** | README, sample `.cht`, upstream anything that belongs upstream. **Also strip the two diagnostic entries** (`DEBUG Wipe Work RAM`, `Test Cheat`) from `interact.json`; the RTL behind them is parameterised off and can stay. | — |
+| **P6** | README, sample `.cht`, upstream anything that belongs upstream. **Strip the diagnostic entries** from `interact.json`; the RTL behind them is parameterised off and can stay. `DEBUG Wipe Work RAM` and `Test Cheat` are already gone. Still to remove before a release: `DEBUG SD Read Probe` (`0x40C`), `DEBUG Probe Chunk` (`0x410`), `DEBUG Path Probe` (`0x414`), and `CD_PROBE` in `target/pocket/core_top.v` set back to 0. | not done |
 
 Every phase after P0 is one commit with a hardware smoke test and a recorded
 `report.txt`. Builds are ~19 minutes in `tools/podman/`, so batch RTL changes

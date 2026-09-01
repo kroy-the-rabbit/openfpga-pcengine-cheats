@@ -64,6 +64,25 @@ input   wire            savestate_load_busy,
 input   wire            savestate_load_ok,
 input   wire            savestate_load_err,
 
+// Generic target command issuer. The core puts a command number and up to four
+// parameter words here and the host executes it. Written once rather than per
+// command because the CD work needs at least three of them: 0x0180 to read a
+// slot, 0x0190 to ask where the user's file actually lives and 0x0192 to open
+// a file named inside it. See docs/CD-PLAN.md §3.
+//
+// A slot read wants deferload set in data.json, and core.json has to declare a
+// framework version that has these commands.
+input   wire            target_cmd_req,             // request, held until ack
+input   wire    [15:0]  target_cmd,                 // 0x0180, 0x0190, 0x0192, ...
+input   wire    [31:0]  target_cmd_p0,              // written to the parameter regs
+input   wire    [31:0]  target_cmd_p1,
+input   wire    [31:0]  target_cmd_p2,
+input   wire    [31:0]  target_cmd_p3,
+
+output  reg             target_cmd_ack,             // busy, high for the transaction
+output  reg             target_cmd_done,            // one cycle pulse on completion
+output  reg     [15:0]  target_cmd_result,          // the host's result code
+
 input   wire    [9:0]   datatable_addr,
 input   wire            datatable_wren,
 input   wire    [31:0]  datatable_data,
@@ -151,6 +170,10 @@ localparam  [3:0]   TARG_ST_SLOTREAD    = 'd3;
 localparam  [3:0]   TARG_ST_SLOTRELOAD  = 'd4;
 localparam  [3:0]   TARG_ST_SLOTWRITE   = 'd5;
 localparam  [3:0]   TARG_ST_SLOTFLUSH   = 'd6;
+// A wait of its own rather than sharing TARG_ST_WAITRESULT, so that a core
+// command finishing cannot be confused with the ready-to-run handshake
+// finishing.
+localparam  [3:0]   TARG_ST_WAITREAD    = 'd14;
 localparam  [3:0]   TARG_ST_WAITRESULT  = 'd15;
     reg     [3:0]   tstate;
     
@@ -167,6 +190,9 @@ initial begin
     savestate_load <= 0;
     osnotify_inmenu <= 0;
     status_setup_done_queue <= 0;
+    target_cmd_ack <= 0;
+    target_cmd_done <= 0;
+    target_cmd_result <= 0;
 end
     
 always @(posedge clk) begin
@@ -402,22 +428,51 @@ always @(posedge clk) begin
     // target > host command executer
     case(tstate)
     TARG_ST_IDLE: begin
+        target_cmd_ack <= 0;
+        // done is a single cycle pulse, cleared here. As a level it would
+        // still be high from the previous command when the requester started
+        // waiting on the next one, and every command after the first would
+        // look like it had finished the moment it was issued.
+        target_cmd_done <= 0;
         if(status_setup_done_queue) begin
             status_setup_done_queue <= 0;
             tstate <= TARG_ST_READYTORUN;
+        end else if(target_cmd_req) begin
+            // Boot takes priority: a command issued before the host is
+            // listening would sit in TARG_ST_WAITREAD forever.
+            target_cmd_ack <= 1;
+            target_20 <= target_cmd_p0;
+            target_24 <= target_cmd_p1;
+            target_28 <= target_cmd_p2;
+            target_2C <= target_cmd_p3;
+            tstate <= TARG_ST_SLOTREAD;
         end
-    
+
     end
     TARG_ST_READYTORUN: begin
         target_0 <= 32'h636D_0140;
         tstate <= TARG_ST_WAITRESULT;
+    end
+    TARG_ST_SLOTREAD: begin
+        // Whatever the core asked for. The state keeps its original name from
+        // the Analogue template, where it was the slot read specifically.
+        target_0 <= {16'h636D, target_cmd};
+        tstate <= TARG_ST_WAITREAD;
+    end
+    TARG_ST_WAITREAD: begin
+        if(target_0[31:16] == 16'h6F6B) begin
+            target_cmd_result <= target_0[15:0];
+            target_cmd_done <= 1;
+            tstate <= TARG_ST_IDLE;
+        end
+
     end
     TARG_ST_WAITRESULT: begin
         if(target_0[31:16] == 16'h6F6B) begin
             // done
             tstate <= TARG_ST_IDLE;
         end
-    
+
     end
     endcase
     

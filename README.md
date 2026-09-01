@@ -46,9 +46,10 @@ hardware, so `.sgx` is not offered rather than offered and broken. If you want
 SuperGrafx, run agg23's core: the two install side by side and this one does not
 replace it.
 
-## PC Engine CD is being researched
+## PC Engine CD is being built
 
-Not supported today, and not abandoned either.
+Not finished, and no longer research. `docs/CD-PLAN.md` is the plan and two of
+its phases are done and verified on real hardware.
 
 The CD RTL is inherited and compiles in every build, `rtl/pce/cd/`: `cd.vhd`,
 `SCSI.vhd`, `SCSI_FIFO.vhd`, `CDDA_FIFO.vhd` and `MSM5205.vhd`. It costs zero
@@ -59,16 +60,27 @@ passes `EN => '1'` at that same point; agg23 changed it when porting.
 
 What makes it a project rather than a switch is that MiSTer's CD block expects
 a host processor running Linux to parse the cue sheet, seek the image and feed
-it sectors, and the Pocket has none.
-[Mazamars312/openfpga-pcengine-cd](https://github.com/Mazamars312/openfpga-pcengine-cd)
-is the core that closed that gap, and its manifest shows the cost: deferred cue
-and bin slots, APF `version_required 2.3` against this core's `1.1`, a System
-Card BIOS the user supplies, and a 64 KB soft MPU standing in for the host.
+it sectors, and the Pocket has none. The drive itself lives on that host, about
+900 lines of it, and all of it has to move into the FPGA.
 
-The open question is which side to build from. Adding cheats to a core that
-already does CD is almost certainly cheaper than adding CD to a core that
-already does cheats, because the CD subsystem is the expensive half and it
-already exists there. `docs/PLAN.md` §7a records the finding and the date.
+Two pieces of that are now working:
+
+* **The transport.** APF target command `0x0180` reads a range of a data slot
+  into the core. Measured on hardware at **1104 KB/s** with 8KB requests, which
+  is 6.3 times what Redbook audio needs on its own.
+* **The file layer.** `0x0190` tells the core where the file the user picked
+  actually lives, and `0x0192` opens a different file next to it. So the core
+  can be handed a cue and open the bin the cue names, which is what a disc
+  image needs and what the Pocket's file browser cannot do by itself.
+
+Still to build: the cue parser, the drive model that answers the SCSI commands
+`cd.vhd` issues, CD-DA streaming and ADPCM. Discs must be **cue plus bin**.
+A bare `.iso` is the data track only, so a game boots and plays silent, and
+`.chd` is compressed in a way that cannot be seek-addressed at all: convert
+with `chdman extractcd` first.
+
+This work is why `core.json` now asks for APF `version_required 2.3` rather
+than `1.1`. **A Pocket on older firmware will not load this core.**
 
 ## What works
 
@@ -81,8 +93,8 @@ already exists there. `docs/PLAN.md` §7a records the finding and the date.
 | Six-button controllers | **works**, upstream's |
 | Controller turbo | **works**, upstream's |
 | Per-game memory cards | **works**, upstream's |
-| SuperGrafx | **off**, and that is what the cheat engine is built out of. See above |
-| PC Engine CD | not supported. The RTL is inherited and held disabled; see above for what it would take |
+| SuperGrafx | **off.** It paid for the cheat engine and it is paying for CD as well. See above |
+| PC Engine CD | **in progress.** The transport and the file layer work on hardware; the drive model is not built. See above |
 | Cartridges | not supported |
 | **Show cheats**, the on-screen list of enabled cheats | **works** |
 | A code store meter | not built. The store holds 32 codes, `MAX_CODES` in `cheat_poker.sv` and `cheat_loader.sv`, and the loader stops committing at it, but nothing shows how full it is |

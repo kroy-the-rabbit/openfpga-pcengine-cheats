@@ -16,6 +16,9 @@ ROMs already in `Assets`. Copy the folders inside `Assets`, `Cores` and
 
 No BIOS is needed. Put `.pce` ROMs in `/Assets/pce/common`.
 
+**This core needs Pocket firmware supporting openFPGA 2.3.** It declares
+`version_required 2.3`, and an older firmware will refuse to load it.
+
 ## Cheats
 
 Put a libretro `.cht` file beside the ROM and pick it in the **Cheats** slot,
@@ -30,10 +33,11 @@ or generated with the cheats you want turned on.
 ## Differences from the upstream agg23 port
 
 * Cheats.
-* SuperGrafx is removed to make room. `.sgx` files still load but render as
-  plain PC Engine and will not look right.
+* SuperGrafx is removed to make room, for the cheat engine and for the CD work
+  behind it. `.sgx` files still load but render as plain PC Engine and will not
+  look right.
 * **Swap ROM Bit Order** for US TurboChip dumps taken bit-reversed.
-* CD-ROM is not supported and is not planned.
+* CD-ROM is not supported yet. It is being built: see `docs/CD-PLAN.md`.
 
 ## Checking a download
 

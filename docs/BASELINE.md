@@ -317,5 +317,6 @@ both are worth keeping:
   every hypothesis cost a 15 minute build. The `Test Cheat` dropdown makes it a
   menu change.
 
-Neither is a shipping feature; P6 removes both from `interact.json`. The RTL
-stays, parameterised off, costing nothing.
+Neither is a shipping feature, and both are already out of `interact.json`.
+The RTL stays, parameterised off, costing nothing. The same obligation now
+applies to the three CD diagnostics added since, listed in `docs/PLAN.md` P6.

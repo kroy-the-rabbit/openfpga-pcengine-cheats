@@ -36,6 +36,27 @@
         ],
         "address": "0x50000000",
         "size_maximum": "0x100000"
+      },
+      {
+        "name": "Disc (probe)",
+        "id": 100,
+        "required": false,
+        "parameters": "0x00000009",
+        "deferload": true,
+        "extensions": [
+          "cue",
+          "bin"
+        ]
+      },
+      {
+        "name": "Disc data",
+        "id": 101,
+        "required": false,
+        "parameters": "0x00000008",
+        "deferload": true,
+        "extensions": [
+          "bin"
+        ]
       }
     ]
   }

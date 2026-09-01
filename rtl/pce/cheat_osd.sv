@@ -58,7 +58,13 @@ module cheat_osd #(
     // comparator on the pixel-rate path and cost 1,552 ALMs and 3.4x the fit
     // time for what is a cosmetic offset.
     parameter COL0 = 3,
-    parameter ROW0 = 2
+    parameter ROW0 = 2,
+
+    // Replace the header line with the read probe's result. A diagnostic, off
+    // in a shipping build, where Quartus folds the whole branch and its inputs
+    // away. Same arrangement as DEBUG_WIPE in cheat_poker: the RTL stays,
+    // parameterised off, costing nothing. See docs/CD-PLAN.md P0.
+    parameter DIAG = 0
 ) (
     input  wire        clk,          // clk_sys_42_95, the video clock here
     input  wire        reset,
@@ -70,6 +76,14 @@ module cheat_osd #(
 
     input  wire [5:0]  title_count,  // enabled groups, from cheat_loader
     input  wire [5:0]  code_count,
+
+    // A ready-made line of 26 font indices, char 0 in the high bits, already
+    // in this clock domain. Ignored when DIAG=0. The diagnostics compose their
+    // own text rather than handing this module their fields to format, so that
+    // every trace of a diagnostic lives in the module P6 deletes and adding a
+    // second one costs nothing here.
+    input  wire         diag_valid,
+    input  wire [155:0] diag_line,
 
     output reg  [4:0]  title_group,  // to cheat_titles
     output reg  [4:0]  title_col,
@@ -157,7 +171,14 @@ module cheat_osd #(
 
   function automatic [5:0] header_char(input [4:0] col);
     begin
-      if (title_count == 6'd0) begin
+      if (DIAG != 0 && diag_valid) begin
+        // Widened before the multiply: 25*6 is 150, which does not fit the
+        // 5 bits `col` is carried in, and a truncated index silently reads the
+        // wrong character. The guard matters too, because `fill` runs past the
+        // last column to drain the pipeline, so `col` reaches 28.
+        if (col > 5'd25) header_char = SP;
+        else header_char = diag_line[({3'd0, (5'd25 - col)} * 8'd6) +: 6];
+      end else if (title_count == 6'd0) begin
         // "NO CHEATS LOADED"
         case (col)
           5'd0:  header_char = N;  5'd1:  header_char = O;
