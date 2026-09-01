@@ -80,9 +80,19 @@ if [[ -n "${QUARTUS_ROOTDIR:-}" ]]; then
   echo "== quartus native $QUARTUS_ROOTDIR"
   quartus() ( cd "$WORK/projects" && "$QUARTUS_ROOTDIR/bin/quartus_sh" "$@" )
 else
+  # keep-id maps the calling user into the container so Quartus writes files
+  # the host user owns. It only exists in rootless podman, and a build runner
+  # is root: podman refuses with "keep-id is only supported in rootless mode".
+  # Root does not need the mapping in the first place, so key the flag on the
+  # uid rather than on the machine.
+  # An if, not `[[ ]] && USERNS=()`: under `set -e` a false test as the last
+  # command of the script's control flow takes the whole build down with it.
+  USERNS=(--userns=keep-id)
+  if [[ $(id -u) -eq 0 ]]; then USERNS=(); fi
+
   quartus() {
     $PODMAN run --rm \
-      --userns=keep-id --security-opt label=disable \
+      "${USERNS[@]}" --security-opt label=disable \
       -v "$WORK:/work" -w /work/projects -e HOME=/tmp \
       "$IMAGE" quartus_sh "$@"
   }
