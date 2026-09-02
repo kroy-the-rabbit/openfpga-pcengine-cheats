@@ -230,7 +230,7 @@ which `docs/PLAN.md` §0 measured as strictly better.
 | **P1** | `0x0190` and `0x0192`, plus the path struct RAM. Prove it by opening a bin the cue names and reading its first sector. | **Done 2026-09-01, passed on hardware.** `G0 O0 R0 L033 P62696E00`. See §5b. |
 | **P2** | `cd_toc.sv`, the cue parser, modeled on `cheat_loader.sv`. TOC in BRAM: per track, start LBA, sector size, type, byte offset. | **Written 2026-09-01 and verified in simulation** against the real Rondo cue, all 22 tracks. See §5d. Not yet wired in or run on hardware. |
 | **P3** | `cd_host.sv`: answers `CD_COMM` with `CD_STAT`/`CD_MSG`/`CD_DOUT`, LBA to offset, sector fetch, `CD_DATA`/`CD_DATA_WR`/`CD_DATA_END`. Data track only, no audio. Uncomment `main.sv`, wire the SDRAM `CD_RAM` path, drive `CD_EN` from a loaded cue. | The System Card reaches its menu and a game reads sector 0. |
-| **P4** | CD-DA: prefetch ring, `CD_AUDIO_WR` at rate, SAPSP, SAPEP, PAUSE, READSUBQ. | **Done 2026-09-02, verified on hardware.** Rondo's CD audio plays. 89 chunks/s against 86 needed, 2.81 ms a read, 25% duty. See §5j. |
+| **P4** | CD-DA: prefetch ring, `CD_AUDIO_WR` at rate, SAPSP, SAPEP, PAUSE, READSUBQ. | **Streaming done 2026-09-02, verified on hardware.** Rondo's CD audio plays: 89 chunks/s against 86 needed, 2.81 ms a read, 25% duty. See §5j. The drive *state* around it was wrong, which §5k covers. |
 | **P5** | ADPCM, REQUESTSENSE, MODESELECT6, seek latency. | Rondo is playable start to finish. |
 | **P6** | Slots and menu: System Card BIOS, cue slot, deferload disc slot, Region toggle, CD RAM and BRM save. Verify the five §0 cheats on hardware. | Cheats apply on a CD game. |
 | **P7** | README, docs, release. | not started |
@@ -1026,3 +1026,70 @@ though it were seconds of playback. A rate needs both of its units checked.
    in the existing save slot enough?
 5. Which System Card does the core require? Rondo needs 3.0, and the US dump has
    a known bad variant that boots but fails some games.
+
+
+## 5k. The drive lied about the music, and a stage load hung
+
+Two symptoms from the same run. The opening cinematic played through with its
+music. At the menu one sound played, cut off, and stopped. Starting the game
+got as far as creating a save, then a black screen.
+
+One cause is proven from the source, and one is not.
+
+**Proven: a data read knocked the drive out of `DS_PLAY`.** `OP_READ6` set
+`dstate <= DS_READ` and `S_WAITEND` returned it to `DS_IDLE` unconditionally.
+The music does not stop for a data read, so from the first READ6 of a track
+onwards `dstate` said idle while `aud_play` said playing. Everything that
+answers from `dstate` was then wrong:
+
+* `READSUBQ` reported audio status `03`, stopped, during playback.
+* `subq_playing` went false with it, so `READSUBQ` reported the position of
+  the last data sector instead of the position of the music.
+* the end-of-region consumer was gated on `dstate == DS_PLAY`, so once a read
+  had moved `dstate` the end of that track was never consumed at all and
+  `aud_play` stayed high for the rest of the run.
+
+A game that polls the drive while it loads a stage is reading all three. The
+fix is that the audio state outlives a data read and a bus reset both:
+`ds_resume` restores `DS_PLAY` or `DS_PAUSE`, and the end-of-region consumer
+is gated on `aud_ended` alone.
+
+The opening cinematic did not show this because nothing polls during it.
+
+**Not proven: why the menu sound cut off.** It is one of two things and the
+overlay now separates them. `Z` counts play regions that reached their end
+offset. If `Z` steps at the cut, the region ended where row 5 says it ends,
+and the question is whether that offset is right or whether the track should
+have repeated. If `Z` does not step, something told the audio to stop, and the
+mode bytes on row 4 say which command: `Q` is SAPSP's byte 1, `R` is SAPEP's.
+
+Those were one register before, holding whichever command arrived last, which
+is why the distinction was not available.
+
+`SAPEP` still writes `aud_play` and `dstate` from its mode byte, which its own
+comment says it should not do. That is deliberately left alone for one run:
+changing it and measuring it together is how the byte order in 5j cost four
+builds.
+
+**P7a missed timing and the reason was not the logic.** Setup came back at
+1.865 ns, better than P6c's 1.266, and the only failure was hold at -0.017 ns
+on one domain with a TNS of -0.030.
+
+The first guess was congestion, on the theory that turning the overlay on
+through `CD_PROBE` had dragged both probe modules in with it. Splitting
+`CD_DIAG` from `CD_PROBE` was worth doing anyway, but it is not what fixed
+this and the numbers say so plainly:
+
+| | ALMs | registers | hold |
+|---|---|---|---|
+| P7a, probes in | 14,769 | 14,388 | -0.017 ns |
+| P7b, probes out | 14,810 | 14,116 | +0.008 ns |
+
+The probes are 272 registers and no ALMs. Area went **up** without them. At
+80% occupancy the hold slack in this domain is placement noise and both builds
+sit inside it; P7b is not a fixed design, it is a luckier placement, and 8 ps
+is not margin to rely on.
+
+What the overlay actually costs is the overlay: close to 1,000 registers, 936
+of them `line_r`, `cd_host`'s snapshot of the whole six-row block. With
+`CD_DIAG = 0` none of it is built, which is the state a release ships in.

@@ -4,31 +4,56 @@ Read this first, then `docs/CD-PLAN.md` for the phase plan.
 
 ## Where it stands
 
-**Rondo of Blood boots, plays, and has music.** Cue plus bin, on hardware, with
-no host processor. Data path, cue parser, drive model, sector fetch and CD-DA
-all verified. ADPCM works too: the Konami splash jingle plays, and it needed
-nothing from the drive model.
+**Rondo boots and the opening cinematic plays with its music.** Cue plus bin,
+on hardware, with no host processor. Data path, cue parser, drive model,
+sector fetch, CD-DA and ADPCM all run.
 
-The open problem this file was written for, the CD-DA underrun, was a byte
-order bug in `cd_audio`'s drain and is fixed. See `docs/CD-PLAN.md` 5j.
+It does not get further. At the menu one sound plays, cuts off and stops.
+Starting the game creates a save and then hangs on a black screen.
 
-P6 is done: the probe and the whole diagnostic overlay are compiled out, the
-menu is clean, and slot 0 loads a System Card by itself so a cue is the only
-thing a disc needs.
+`docs/CD-PLAN.md` 5k has the analysis. In short: a data read was knocking the
+drive out of `DS_PLAY`, so `READSUBQ` reported the wrong status and the wrong
+position for the whole of every track that had a read in it, and the end of a
+region was never consumed. That is fixed. Why the menu sound cuts off is not
+settled and the overlay is back on to settle it.
 
 | | |
 |---|---|
 | branch | `cd-streaming` |
-| last build | p6c, sisko, 10 m 31 s, setup 1.266 ns, hold 0.066 ns, 13,181 ALMs |
+| last flashed | p6c, sisko, 10 m 31 s, setup 1.266 ns, hold 0.066 ns, 13,181 ALMs |
 | worktree | `worktrees/p5` on `cd-adpcm`, started then stopped, nothing committed |
-| card | P6c flashed and verified |
 
-## What is left
+## What to do with the next run
+
+`CD_DIAG` is 1, so the six rows draw over a loaded cue with **Show cheats**
+on. `CD_PROBE` stays 0: the rows come from `cd_host` over `cd_enable` and need
+neither probe module nor a menu entry. The two used to be one switch.
+
+Note the margin: P7b meets hold by 8 ps, and P7a missed by 17 ps with 41
+fewer ALMs. Hold in that domain is placement noise at 80% occupancy, so treat
+a debug build's timing as luck rather than headroom, and check `report.sh`
+every time. Setup is not close in either: 1.760 and 1.865 ns. Two readings decide everything:
+
+* **`Z` on row 4, at the moment the menu sound cuts off.** If it steps, the
+  region reached the end offset row 5 shows, and the question is whether that
+  offset is right or whether the track was meant to repeat. If it does not
+  step, a command stopped the audio, and `Q` and `R` on the same row say which
+  one and with what mode byte. `Q` is SAPSP's byte 1, `R` is SAPEP's.
+* **`Y` on row 2 against `F` on row 0, at the black screen.** `Y` running
+  while `F` stands still is a game polling the drive for an answer it never
+  gets. Both frozen means the core stopped asking. `F` still climbing means
+  data is flowing and the hang is somewhere else.
+
+`SAPEP` still writes `aud_play` and `dstate` from its mode byte, which its own
+comment says it should not. Left alone deliberately, so that this run measures
+the current behaviour rather than a changed one.
+
+## What is left after that
 
 **The cheats have never been tried on a CD game.** That is what the whole
-project was for, and nothing has tested it: slot 2 loads a `.cht` and the
-poker writes into the 8KB work RAM once a frame, which is where all five Rondo
-codes point, but no run has confirmed it. Start here.
+project was for. `Castlevania - Rondo of Blood.cht` is on the card in
+`Assets/pce/common/`, five titles and six pokes, all pointing into the 8KB
+work RAM the poker already writes. Nothing has confirmed it runs.
 
 Then, none of it blocking play:
 
@@ -37,28 +62,25 @@ Then, none of it blocking play:
   reference and have never run. Needs a game that uses them.
 * **Eight audio reads fail at startup with result 2.** The count stopped moving
   after startup, so they are not in the steady state, but nothing explains them
-  and what APF result 2 means is not documented anywhere in this tree. Seeing
-  them again means `CD_PROBE = 1` and restoring the three DEBUG menu entries.
-* **CD-DA stops at the end of a play region rather than repeating.** The
-  end-behaviour byte is recorded in `cdda_mode` and what its values mean is not
-  established, so the implemented behaviour is the one that fixes a hang. A
-  title whose music stops when it should loop is the first sign this is wrong.
-* **Opening the core cold boots the System Card** rather than prompting for a
-  file, which is what `filename` on a required slot does. If a prompt is wanted
-  instead, `variants.json` is an empty list and a CD variant with slot 100
-  `required: true` would do it without touching logic.
+  and what APF result 2 means is not documented anywhere in this tree.
+* **A multi-sector READ6 that crosses a track boundary** keeps the track it
+  started in. Rondo's data is one track so it has never mattered.
 
 ## The overlay, when it is turned back on
 
-`CD_PROBE = 0` compiles all of this out. At 1, with the three DEBUG entries
-restored to `interact.json`, it reads:
+`CD_DIAG = 0` compiles the rows out; `CD_PROBE` is separate and gates only the
+two probe modules. With `CD_DIAG = 1` and **Show cheats** on it reads:
 
     T22 C001C OD9 S0 D3 F00C9
     H 08 08 08 08 D8 D9 E0
-    L00000F5D A008BE830
+    L00000F5D A008BE830 Y0142
     A0648 E0008 K2 W8R8 U0 N0
-    Q 02 40 P1 T0012 B11A4
+    Q 02 40 R 00 40 P1 Z0003
     S01CE2580 X02EC6E30
+
+Row 2 gained `Y`, READSUBQ commands answered. Row 4 lost the two throughput
+fields, which had done their job, and gained SAPEP's mode bytes as `R` and the
+end-of-region count as `Z`. `cd_host.sv` carries the full legend.
 
 Reads over playback seconds is the chunk rate and should be 86: 1608 over 18
 is 89. Busy milliseconds over reads is what one read costs: 4516 over 1608 is

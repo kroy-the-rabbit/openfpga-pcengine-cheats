@@ -470,6 +470,23 @@ module core_top (
   // parsed. See docs/CD-PLAN.md 5g.
   localparam CD_PROBE = 0;
 
+  // Whether the drive model's six rows are drawn. This is NOT the same switch:
+  // those rows come from cd_host over `cd_enable`, which follows the loaded
+  // cue, and they need neither probe module nor a menu entry.
+  //
+  // The two were one switch and separating them is worth it on its own, but
+  // the measured cost is not where it looks. The probes are 272 registers and
+  // no ALMs at all: P7a with them was 14,769 ALMs and P7b without them was
+  // 14,810. What the overlay costs is the overlay, near 1,000 registers of
+  // which 936 are cd_host's `line_r` snapshot.
+  //
+  // So do not read P7a's hold failure as congestion. It missed by 17 ps and
+  // P7b met by 8 ps with 41 more ALMs; at 80% occupancy hold slack in this
+  // domain is placement noise and both builds sit inside it. Setup was 1.865
+  // and 1.760 ns, never close. A debug build is what this margin buys, and
+  // the release build is the one with CD_DIAG back at 0.
+  localparam CD_DIAG = 1;
+
   wire         probe_req, path_req;
   wire [ 15:0] probe_cmd, path_cmd;
   wire [ 31:0] probe_p0, probe_p1, probe_p2, probe_p3;
@@ -1623,7 +1640,7 @@ module core_top (
   );
 
   cheat_osd #(
-      .DIAG(CD_PROBE)
+      .DIAG(CD_DIAG)
   ) osd (
       .clk    (clk_mem_85_91),
       .reset  (~reset_n),

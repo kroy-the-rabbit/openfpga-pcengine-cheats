@@ -280,7 +280,20 @@ module cd_host (
   reg [31:0] apos;                  // the LBA an audio command named
   reg [15:0] apos_ms;               // minutes and seconds, part way there
   reg [ 1:0] apos_step;
-  reg [47:0] aud_cdb;               // the six bytes that named it, for the OSD
+  // SAPSP and SAPEP each named a position and each carried a mode byte, and
+  // one register holding whichever arrived last cannot say which mode belongs
+  // to which command. Two of the three things still unknown about CD-DA are
+  // read straight off these, so they are kept apart.
+  reg [47:0] aud_cdb;               // SAPSP: bytes 1, 9, 2, 3, 4, 5
+  reg [47:0] sep_cdb;               // SAPEP: the same six
+  reg [15:0] subq_cnt;              // READSUBQ commands answered
+  reg [15:0] ended_cnt;             // play regions that reached their end
+
+  // The audio state outlives a data read and a bus reset both: neither one
+  // stops the music, and before this the drive came back from either of them
+  // claiming to be idle. `dstate` is what READSUBQ answers from, so that made
+  // the drive lie about the music for the rest of the track.
+  reg        aud_paused;            // seeked and holding, rather than idle
 
   // Counters and witnesses, for the diagnostic line only. Nothing reads them.
   reg [15:0] cmd_count, fetch_count;
@@ -289,6 +302,9 @@ module cd_host (
   reg [31:0] last_off;                 // byte offset the last fetch asked for
   reg [31:0] sec_head;                 // first four bytes handed to the core
   reg [ 7:0] hist0, hist1, hist2, hist3, hist4, hist5;   // hist5 is newest
+
+  wire [2:0] ds_resume = aud_play   ? DS_PLAY
+                       : aud_paused ? DS_PAUSE : DS_IDLE;
 
   always @(posedge clk) begin
     // One-clock strobes, cleared every cycle and set where they are meant.
@@ -317,12 +333,16 @@ module cd_host (
       msf_busy   <= 1'b0;
       pend_check <= 1'b0;
       aud_play    <= 1'b0;
+      aud_paused  <= 1'b0;
       aud_lba0    <= 32'd0;
       aud_trk_lba <= 32'd0;
       aud_track   <= 7'd1;
       aud_start  <= 32'd0;
       aud_end    <= 32'd0;
       aud_cdb    <= 48'd0;
+      sep_cdb    <= 48'd0;
+      subq_cnt   <= 16'd0;
+      ended_cnt  <= 16'd0;
       off_mode   <= OFF_DATA;
       cmd_count  <= 16'd0;
       fetch_count<= 16'd0;
@@ -339,7 +359,8 @@ module cd_host (
       state     <= S_IDLE;
       fetch_req <= 1'b0;
       msf_busy  <= 1'b0;
-      if (dstate != DS_NODISC) dstate <= DS_IDLE;
+      // CDDA does not run over the SCSI bus, so a bus reset does not stop it.
+      if (dstate != DS_NODISC) dstate <= ds_resume;
     end else begin
 
       // A parsed cue is a disc in the drive, and nothing else was ever going
@@ -357,12 +378,28 @@ module cd_host (
       // track end would have waited for ever. Ahead of the case for the same
       // reason as the promotion above: a command arriving this cycle wins.
       //
+      // Gated on `aud_ended` alone and not on `dstate == DS_PLAY`, because a
+      // data read moves `dstate` and the music does not stop for it. With the
+      // dstate test here, the first READ6 of a stage load left dstate at
+      // DS_IDLE, and the end of that track was then never consumed at all:
+      // `aud_play` stayed high for the rest of the run.
+      //
+      // `aud_ended` is a level held until the next restart, not a pulse, so
+      // this re-fires until it takes. That is what settles the one cycle race
+      // against a command in the case below: the case is later and wins, and
+      // unless that command was the restart which clears `aud_ended`, this
+      // fires again next cycle.
+      //
       // It stops rather than repeating. The end-behaviour byte is recorded in
       // cdda_mode but what its values mean is not established, and a game that
       // wants a track again re-issues SAPSP.
-      if (aud_ended && dstate == DS_PLAY) begin
-        aud_play <= 1'b0;
-        dstate   <= DS_IDLE;
+      if (aud_ended) begin
+        // Counted only on the edge, since the level holds: `aud_play` is high
+        // for exactly the first cycle of it.
+        if (aud_play) ended_cnt <= ended_cnt + 16'd1;
+        aud_play   <= 1'b0;
+        aud_paused <= 1'b0;
+        if (dstate == DS_PLAY) dstate <= DS_IDLE;
       end
 
       // ---- the MSF converter, running whenever it has been started -------
@@ -514,7 +551,7 @@ module cd_host (
             // Set audio playback end position. Same decode, and it does not
             // disturb a stream already running: only where it stops.
             OP_SAPEP: begin
-              aud_cdb   <= {cdb1, cdb9, cdb2, cdb3, cdb4, cdb5};
+              sep_cdb   <= {cdb1, cdb9, cdb2, cdb3, cdb4, cdb5};
               cdda_mode <= cdb1;
               off_mode  <= OFF_AEND;
               apos_step <= 2'd0;
@@ -523,13 +560,19 @@ module cd_host (
 
             OP_PAUSE: begin
               // Unconditional GOOD, with no check that anything was playing.
-              dstate   <= DS_PAUSE;
-              aud_play <= 1'b0;
+              dstate     <= DS_PAUSE;
+              aud_play   <= 1'b0;
+              aud_paused <= 1'b1;
               rsp_len  <= 5'd0;
               state    <= S_STATUS;
             end
 
             OP_READSUBQ: begin
+              // Counted because a game that is waiting on the drive polls
+              // this and nothing else. Against the fetch count it separates
+              // the two ways a load can stop: a poll that never gets the
+              // answer it wants, or a transport that stopped delivering.
+              subq_cnt <= subq_cnt + 16'd1;
               rsp[0] <= (dstate == DS_PAUSE) ? 8'h02
                       : (dstate == DS_PLAY)  ? 8'h00 : 8'h03;
               rsp[1] <= 8'h00;               // control/ADR, always zero
@@ -734,13 +777,15 @@ module cd_host (
                   aud_end     <= 32'hFFFF_FFFF;
                   aud_restart <= 1'b1;
                   aud_play    <= (cdda_mode != 8'h00);
+                  aud_paused  <= (cdda_mode == 8'h00);
                   dstate      <= (cdda_mode == 8'h00) ? DS_PAUSE : DS_PLAY;
                   state       <= S_STATUS;
                 end
                 OFF_AEND: begin
                   aud_end  <= trk_base + sec_scaled;
-                  aud_play <= (cdda_mode != 8'h00);
-                  dstate   <= (cdda_mode == 8'h00) ? DS_IDLE : DS_PLAY;
+                  aud_play   <= (cdda_mode != 8'h00);
+                  aud_paused <= 1'b0;
+                  dstate     <= (cdda_mode == 8'h00) ? DS_IDLE : DS_PLAY;
                   state    <= S_STATUS;
                 end
                 default: begin
@@ -828,7 +873,13 @@ module cd_host (
               lba <= lba + 32'd1;
               if (cnt == 9'd1) begin
                 cnt    <= 9'd0;
-                dstate <= DS_IDLE;
+                // Back to what the drive was doing, which is playing if the
+                // music never stopped. Returning unconditionally to DS_IDLE
+                // meant the first data read of a stage load knocked the drive
+                // out of DS_PLAY behind the music's back. READSUBQ then
+                // answered 03 stopped, and answered it about the data head
+                // instead of the music, for the rest of the track.
+                dstate <= ds_resume;
                 state  <= S_STATUS;
               end else begin
                 cnt         <= cnt - 9'd1;
@@ -869,41 +920,42 @@ module cd_host (
   end
 
   // ---------------------------------------------------------- the block ----
-  // Four rows, all visible at once. Paging them cost four screenshots to read
+  // Six rows, all visible at once. Paging them cost four screenshots to read
   // one state, and the two halves of a failure never appeared together.
   //
-  //   T22 C0012 O08 S5 D2 F0004    tracks, commands, opcode, sequencer state,
-  //                                drive state, sectors fetched
-  //   H 00 DE DE DE DE 08 E0       the last six opcodes oldest first, then the
+  //   T22 C001C OD9 S0 D3 F00C9    track count, commands answered, last
+  //                                opcode, sequencer state, drive state,
+  //                                sectors fetched
+  //   H 08 08 08 08 D8 D9 E0       the last six opcodes oldest first, then the
   //                                last non-zero fetch result
-  //   L00000E51 A00838830          the LBA asked for and the byte offset it
-  //                                was turned into
-  //   A0123 E0004 K2 W3R1 U2 N2   audio reads that worked, reads that failed,
-  //                                last failure code, the two ring pointers,
-  //                                and how full the ring looks from the
-  //                                fetcher's side and the reader's
-  //   Q 01 40 P1 T0005 B0140      the two mode bytes of the last audio
-  //                                command, whether it is playing, seconds
-  //                                spent playing, and milliseconds the
-  //                                transport held a read. Reads over seconds
-  //                                is the chunk rate and should be 86;
-  //                                milliseconds over reads is what one costs.
-  //   S0088E830 X0093F000 T0011    the audio start and end byte offsets, and
-  //                                seconds since reset. Reads divided by
-  //                                seconds should be 86: that is 176,400
-  //                                bytes a second in 2048 byte chunks.
+  //   L00000F5D A008BE830 Y0142    the LBA of the last READ6, the byte offset
+  //                                it became, and READSUBQ commands answered
+  //   A0648 E0008 K2 W8R8 U0 N0    audio reads that worked, reads that failed,
+  //                                the last failure code, the two ring
+  //                                pointers, and how full the ring looks from
+  //                                the fetcher's side and the reader's
+  //   Q 02 40 R 00 40 P1 Z0003     SAPSP's byte 1 and byte 9, then SAPEP's,
+  //                                then whether audio is playing, then play
+  //                                regions that reached their end
+  //   S01CE2580 X02EC6E30          the audio start and end byte offsets
   //
-  // The last two are the ones that matter: rows 2 and 3 together say what was
-  // asked for, where it landed, and whether what came back is what is there.
-  // A00838830 with B00000000 is a read that failed silently; the E field on
-  // row 1 says so outright.
+  // Rows 2 and 4 are the pair that says why a load stopped. `F` against `Y`
+  // separates a transport that stopped delivering from a game polling the
+  // drive for an answer it never gets: in a poll loop `Y` runs and `F` stands
+  // still. `Z` against row 5 separates the two ways music can stop early, a
+  // region that genuinely reached the end offset on screen, or something that
+  // told it to stop; the mode bytes on row 4 say which command did.
+  //
+  // Rows 1 and 2 are the older pair: what the game asked for and where it
+  // landed. Row 3 says whether the audio ring is still turning under all of
+  // it, and `K` there is sticky, so it is a witness and never a rate.
 
   // Font indices are ASCII - 32, matching cheat_font.
   localparam [5:0] SP = 6'd0, A_ = 6'd33, B_ = 6'd34, C_ = 6'd35, D_ = 6'd36,
                    E_ = 6'd37, F_ = 6'd38, H_ = 6'd40, L_ = 6'd44, N_ = 6'd46,
                    G_ = 6'd39, K_ = 6'd43, U_ = 6'd53,
                    O_ = 6'd47, P_ = 6'd48, Q_ = 6'd49, R_ = 6'd50, S_ = 6'd51,
-                   T_ = 6'd52, W_ = 6'd55, X_ = 6'd56;
+                   T_ = 6'd52, W_ = 6'd55, X_ = 6'd56, Y_ = 6'd57, Z_ = 6'd58;
 
   function automatic [5:0] hx(input [3:0] v);
     begin
@@ -962,8 +1014,8 @@ module cd_host (
 
   wire [155:0] row2 = {
       L_, hx8(last_lba), SP,
-      A_, hx8(last_off),
-      SP, SP, SP, SP, SP, SP, SP
+      A_, hx8(last_off), SP,
+      Y_, hx4(subq_cnt), SP
   };
 
   wire [155:0] row3 = {
@@ -975,16 +1027,19 @@ module cd_host (
       N_, hx(aud_level), SP
   };
 
-  // The audio command as it arrived: byte 1, byte 9, then bytes 2 to 5. Byte
-  // 9's top two bits pick the address form and byte 1 says play or seek, and
-  // neither has been confirmed against a real disc, so they go on screen
-  // rather than into a comment.
+  // The two audio commands as they arrived, apart: Q is SAPSP and R is SAPEP,
+  // each showing its byte 1 and its byte 9. Byte 9's top two bits pick the
+  // address form; byte 1 is the mode, and what its values mean is the one
+  // thing about CD-DA still taken on trust. Z counts regions that reached
+  // their end, which is the other half of the same question: a track that
+  // stops when it should not either hit its end or was told to stop, and
+  // nothing else can tell those apart.
   wire [155:0] row4 = {
       Q_, SP, hx2(aud_cdb[47:40]), SP, hx2(aud_cdb[39:32]), SP,
+      R_, SP, hx2(sep_cdb[47:40]), SP, hx2(sep_cdb[39:32]), SP,
       P_, hx({3'd0, aud_play}), SP,
-      T_, hx4(aud_secs), SP,
-      B_, hx4(aud_busy_ms),
-      SP, SP, SP, SP
+      Z_, hx4(ended_cnt),
+      SP, SP
   };
 
   wire [155:0] row5 = {

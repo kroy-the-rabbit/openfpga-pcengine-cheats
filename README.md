@@ -57,8 +57,9 @@ replace it.
 
 ## PC Engine CD is being built
 
-`docs/CD-PLAN.md` is the plan. **Castlevania: Rondo of Blood boots, plays and
-has music**, verified on hardware.
+`docs/CD-PLAN.md` is the plan. **Castlevania: Rondo of Blood boots, and the
+opening plays with its music**, verified on hardware. Starting a stage still
+hangs; see P7 in the plan.
 
 The CD RTL is inherited, `rtl/pce/cd/`: `cd.vhd`, `SCSI.vhd`, `SCSI_FIFO.vhd`,
 `CDDA_FIFO.vhd` and `MSM5205.vhd`. It is live now: `pce_top.vhd` passes
@@ -131,7 +132,7 @@ than `1.1`. **A Pocket on older firmware will not load this core.**
 | Controller turbo | **works**, upstream's |
 | Per-game memory cards | **works**, upstream's |
 | SuperGrafx | **off.** It paid for the cheat engine and it is paying for CD as well. See above |
-| PC Engine CD | **in progress.** Rondo boots, plays and has music on hardware. Menu and slot work still to do. See above |
+| PC Engine CD | **in progress.** Rondo boots and the opening plays with music. Starting a stage hangs. See above |
 | Cartridges | not supported |
 | **Show cheats**, the on-screen list of enabled cheats | **works** |
 | A code store meter | not built. The store holds 32 codes, `MAX_CODES` in `cheat_poker.sv` and `cheat_loader.sv`, and the loader stops committing at it, but nothing shows how full it is |
