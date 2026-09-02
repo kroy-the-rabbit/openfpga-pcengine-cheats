@@ -12,35 +12,46 @@ nothing from the drive model.
 The open problem this file was written for, the CD-DA underrun, was a byte
 order bug in `cd_audio`'s drain and is fixed. See `docs/CD-PLAN.md` 5j.
 
+P6 is done: the probe and the whole diagnostic overlay are compiled out, the
+menu is clean, and slot 0 loads a System Card by itself so a cue is the only
+thing a disc needs.
+
 | | |
 |---|---|
 | branch | `cd-streaming` |
-| last build | p4g, sisko, 11 m 22 s, setup 1.276 ns, hold 0.075 ns, 246 M10K |
+| last build | p6c, sisko, 10 m 31 s, setup 1.266 ns, hold 0.066 ns, 13,181 ALMs |
 | worktree | `worktrees/p5` on `cd-adpcm`, started then stopped, nothing committed |
-| card | P4g flashed and verified |
+| card | P6c flashed and verified |
 
 ## What is left
 
-Small, and none of it blocks playing the game:
+**The cheats have never been tried on a CD game.** That is what the whole
+project was for, and nothing has tested it: slot 2 loads a `.cht` and the
+poker writes into the 8KB work RAM once a frame, which is where all five Rondo
+codes point, but no run has confirmed it. Start here.
 
-* **`aud_ended` is an input nothing consumes.** When CD-DA reaches the end
-  position `dstate` stays `DS_PLAY` for ever, so a game polling READSUBQ for
-  track end waits for ever. Rondo does not appear to, but something will.
-* **`READSUBQ` reports the data read head, not the audio play position.**
-  `cd_audio` needs a sector counter for this; a CD-DA sector is 2352 bytes,
-  exactly 588 stereo frames, so it costs a counter and no divide.
+Then, none of it blocking play:
+
 * **Two of the three SAPSP address forms are unexercised.** Rondo only ever
   uses MSF, byte 9 = 0x40. The LBA and track-number forms are written from the
-  reference and never run.
-* **Eight audio reads fail at startup with result 2.** The count has not moved
-  since, so they are not in the steady state, but nothing explains them and
-  what APF result 2 means is not documented anywhere in this tree.
-* **P6 has not started:** strip the three DEBUG menu entries, set
-  `CD_PROBE = 0`, add the CD Audio Boost entry that is wired but unexposed, and
-  verify the five Rondo cheat codes on hardware. That last one is what the
-  whole project was for.
+  reference and have never run. Needs a game that uses them.
+* **Eight audio reads fail at startup with result 2.** The count stopped moving
+  after startup, so they are not in the steady state, but nothing explains them
+  and what APF result 2 means is not documented anywhere in this tree. Seeing
+  them again means `CD_PROBE = 1` and restoring the three DEBUG menu entries.
+* **CD-DA stops at the end of a play region rather than repeating.** The
+  end-behaviour byte is recorded in `cdda_mode` and what its values mean is not
+  established, so the implemented behaviour is the one that fixes a hang. A
+  title whose music stops when it should loop is the first sign this is wrong.
+* **Opening the core cold boots the System Card** rather than prompting for a
+  file, which is what `filename` on a required slot does. If a prompt is wanted
+  instead, `variants.json` is an empty list and a CD variant with slot 100
+  `required: true` would do it without touching logic.
 
-## What the overlay reads when it is working
+## The overlay, when it is turned back on
+
+`CD_PROBE = 0` compiles all of this out. At 1, with the three DEBUG entries
+restored to `interact.json`, it reads:
 
     T22 C001C OD9 S0 D3 F00C9
     H 08 08 08 08 D8 D9 E0
