@@ -29,6 +29,8 @@ need.
 | `cd_toc.sv` | parses a cue sheet into a track table |
 | `cd_host.sv` | the CD drive, reimplemented from srg320's `pcecdd.cpp` |
 | `cd_fetch.sv` | pulls sectors off the SD card through the APF bridge |
+| `cd_audio.sv` | streams CD-DA out of a ring of the bin at 44.1 kHz |
+| `cd_diag.sv` | the diagnostic overlay block, as a character RAM |
 | `dataslot_path.sv` | opens the bin a cue names, next to the cue |
 | `dataslot_probe.sv` | measures the transport, a diagnostic |
 
@@ -55,8 +57,8 @@ replace it.
 
 ## PC Engine CD is being built
 
-`docs/CD-PLAN.md` is the plan. **Castlevania: Rondo of Blood boots and plays**,
-verified on hardware. There is no audio yet.
+`docs/CD-PLAN.md` is the plan. **Castlevania: Rondo of Blood boots, plays and
+has music**, verified on hardware.
 
 The CD RTL is inherited, `rtl/pce/cd/`: `cd.vhd`, `SCSI.vhd`, `SCSI_FIFO.vhd`,
 `CDDA_FIFO.vhd` and `MSM5205.vhd`. It is live now: `pce_top.vhd` passes
@@ -95,8 +97,13 @@ same room. Their manifest is prior art this leaned on: the cue plus bin data
 slot layout here, slot IDs included, was checked against theirs, and so was the
 `version_required` floor. See `docs/CD-PLAN.md`.
 
-Still to build: **CD-DA streaming**, which is why Rondo is silent, and ADPCM,
-which is why it has no speech.
+* **CD-DA streaming.** `rtl/pce/cd_audio.sv`, a 16KB ring of the bin drained
+  into the CD block at 44.1 kHz, paced against the same accumulator constants
+  the core's own sample clock uses. ADPCM needed nothing: its RAM and its DMA
+  live inside `cd.vhd` and feed off the SCSI data phase.
+
+Still to build: the menu and slot work in P6, and the SCSI edge cases in P5.
+See `docs/CD-HANDOFF.md`.
 
 Discs must be **cue plus bin**. A bare `.iso` is the data track only, so a game
 boots and plays silent, and `.chd` is compressed in a way that cannot be
@@ -117,7 +124,7 @@ than `1.1`. **A Pocket on older firmware will not load this core.**
 | Controller turbo | **works**, upstream's |
 | Per-game memory cards | **works**, upstream's |
 | SuperGrafx | **off.** It paid for the cheat engine and it is paying for CD as well. See above |
-| PC Engine CD | **in progress.** Rondo boots and plays on hardware. No CD-DA and no ADPCM yet, so it is silent. See above |
+| PC Engine CD | **in progress.** Rondo boots, plays and has music on hardware. Menu and slot work still to do. See above |
 | Cartridges | not supported |
 | **Show cheats**, the on-screen list of enabled cheats | **works** |
 | A code store meter | not built. The store holds 32 codes, `MAX_CODES` in `cheat_poker.sv` and `cheat_loader.sv`, and the loader stops committing at it, but nothing shows how full it is |

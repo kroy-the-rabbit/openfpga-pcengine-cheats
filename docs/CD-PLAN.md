@@ -230,7 +230,7 @@ which `docs/PLAN.md` §0 measured as strictly better.
 | **P1** | `0x0190` and `0x0192`, plus the path struct RAM. Prove it by opening a bin the cue names and reading its first sector. | **Done 2026-09-01, passed on hardware.** `G0 O0 R0 L033 P62696E00`. See §5b. |
 | **P2** | `cd_toc.sv`, the cue parser, modeled on `cheat_loader.sv`. TOC in BRAM: per track, start LBA, sector size, type, byte offset. | **Written 2026-09-01 and verified in simulation** against the real Rondo cue, all 22 tracks. See §5d. Not yet wired in or run on hardware. |
 | **P3** | `cd_host.sv`: answers `CD_COMM` with `CD_STAT`/`CD_MSG`/`CD_DOUT`, LBA to offset, sector fetch, `CD_DATA`/`CD_DATA_WR`/`CD_DATA_END`. Data track only, no audio. Uncomment `main.sv`, wire the SDRAM `CD_RAM` path, drive `CD_EN` from a loaded cue. | The System Card reaches its menu and a game reads sector 0. |
-| **P4** | CD-DA: prefetch ring, `CD_AUDIO_WR` at rate, SAPSP, SAPEP, PAUSE, READSUBQ. | **Written and run 2026-09-02. Delivers correct bytes, underruns, sounds like static.** See `docs/CD-HANDOFF.md`. Rondo's intro plays in sync. |
+| **P4** | CD-DA: prefetch ring, `CD_AUDIO_WR` at rate, SAPSP, SAPEP, PAUSE, READSUBQ. | **Done 2026-09-02, verified on hardware.** Rondo's CD audio plays. 89 chunks/s against 86 needed, 2.81 ms a read, 25% duty. See §5j. |
 | **P5** | ADPCM, REQUESTSENSE, MODESELECT6, seek latency. | Rondo is playable start to finish. |
 | **P6** | Slots and menu: System Card BIOS, cue slot, deferload disc slot, Region toggle, CD RAM and BRM save. Verify the five §0 cheats on hardware. | Cheats apply on a CD game. |
 | **P7** | README, docs, release. | not started |
@@ -938,6 +938,52 @@ window and the modes, and nothing streams.
 
 ADPCM is untouched and is P5. Rondo uses it for voice, so speech will still be
 missing once CD-DA plays.
+
+## 5j. P4 as built: the ring was never the problem
+
+Rondo's CD audio plays. In stage 1, 18 seconds into a track:
+
+    A0648 E0008 K2 W8R8 U0 N0
+    Q 02 40 P1 T0012 B11A4
+
+1608 reads over 18 seconds of playback is 89 chunks a second against the 86
+Redbook needs. 4516 ms of transport time over those reads is 2.81 ms each,
+which is what the throughput probe measures standalone. A 25% duty cycle is
+exactly the work required to keep up, so the fetcher spends three quarters of
+its time idle with the ring full.
+
+### What cost four builds
+
+Every frame was emitted backwards. The bridge writes big-endian into a word,
+so byte 0 of the file arrives at bits [31:24] of the ring word. `cd_fetch`
+already knew that and says so; `cd_audio` emitted [7:0] first, which swaps left
+with right and byte-swaps both samples. Byte-swapped PCM is static.
+
+The header of the module claimed the opposite in as many words: "the sectors
+stream out verbatim, no swapping". Writing that down made it a settled fact
+that never got checked, while four builds went looking upstream.
+
+Two real bugs were found and fixed on the way, so the search was not wasted:
+
+* **The fetcher deadlocked on the first SAPSP.** A restart abandoned an
+  in-flight transport command between `cmd_ack` and `cmd_done`, throwing the
+  completion away, and the next read waited for a `done` that had already
+  gone. Restarts are deferred to `A_IDLE` now.
+* **The audio read result was not connected at all**, so a failing read had no
+  way to report itself.
+
+### What the instrumentation was worth
+
+It never pointed at the bug, and it is what found it. By establishing that the
+rate, the read cost, the duty cycle and the ring contents were all correct, it
+eliminated the transport entirely and left one place for the fault to be. The
+sequence that worked, three times now, is to put the disputed quantity on
+screen rather than reason about it: `G` proved the ring held the right bytes,
+`A` and `E` killed the read-failure theory, `U` against `N` killed the Gray
+crossing theory, and `T` with `B` killed the transport.
+
+The one measurement that misled was a counter of seconds since reset read as
+though it were seconds of playback. A rate needs both of its units checked.
 
 ## 6. Risks
 
