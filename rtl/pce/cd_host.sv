@@ -2,6 +2,16 @@
 //
 // The CD drive, as the PC Engine's CD interface chip expects to find it.
 //
+// This is a reimplementation of `pcecdd.cpp` by srg320, the host-side drive
+// model from TurboGrafx16_MiSTer, in RTL rather than C++. The opcode set, the
+// two sense codes, the track clamping, the fixed responses and the decision to
+// give seeks no latency at all are its design decisions, not this file's. No
+// code was copied; the behaviour is its.
+//
+// Mazamars312's openfpga-pcengine-cd solves the same problem the other way, by
+// putting a soft CPU in the fabric and running a firmware drive on it. See the
+// README.
+//
 // `docs/CD-PLAN.md` P3. `cd.vhd` is only the interface chip: it speaks SCSI to
 // a drive that, on MiSTer, is 900 lines of C++ running on a Linux host. The
 // Pocket has no host, so the drive lives here. The specification this is built

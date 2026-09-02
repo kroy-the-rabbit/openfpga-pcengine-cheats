@@ -12,10 +12,12 @@ srg320 and greyrogue, which is in turn built on
 [FPGAPCE](https://github.com/Torlus/FPGAPCE) by Gregory Estrade. Everything that
 ships here is theirs apart from the cheat engine.
 
-What this fork adds is five modules, all built by `rtl/pce.qip`, the port
-`cheat_poker` borrows in `pce_top.vhd`, a data slot to load codes through and
-two menu switches. It also turns SuperGrafx off, which is the price of the room
-they need.
+What this fork adds is the cheat engine and, on top of upstream's dormant CD
+RTL, the host side that CD block has always needed. All of it is built by
+`rtl/pce.qip` and `target/pocket/core.qip`, plus the port `cheat_poker` borrows
+in `pce_top.vhd`, data slots to load codes and discs through and a few menu
+switches. It also turns SuperGrafx off, which is the price of the room they
+need.
 
 | | |
 |---|---|
@@ -24,6 +26,11 @@ they need.
 | `cheat_osd.sv` | draws the enabled cheats over the picture |
 | `cheat_titles.sv` | holds their names for the overlay |
 | `cheat_font.sv` | the glyphs |
+| `cd_toc.sv` | parses a cue sheet into a track table |
+| `cd_host.sv` | the CD drive, reimplemented from srg320's `pcecdd.cpp` |
+| `cd_fetch.sv` | pulls sectors off the SD card through the APF bridge |
+| `dataslot_path.sv` | opens the bin a cue names, next to the cue |
+| `dataslot_probe.sv` | measures the transport, a diagnostic |
 
 `main.sv` and `target/pocket/core_top.v` are modified to wire them in. See
 [docs/CHEATS.md](docs/CHEATS.md).
@@ -72,7 +79,21 @@ Working, each verified on hardware:
 * **The cue parser.** `rtl/pce/cd_toc.sv`, streaming, no host. Track numbers,
   types, sector sizes and the byte offset of every track in the bin.
 * **The drive model.** `rtl/pce/cd_host.sv`, nine SCSI opcodes, phase ordering
-  and status timing as `cd.vhd` demands them.
+  and status timing as `cd.vhd` demands them. **This is a reimplementation of
+  srg320's `pcecdd.cpp`**, the host-side drive model from TurboGrafx16_MiSTer,
+  not original work: the opcode set, the sense codes, the track clamping and
+  the decision to give seeks zero latency are all its design, moved into RTL.
+  No code was copied.
+
+There is already a working PC Engine CD core for the Pocket,
+[Mazamars312's](https://github.com/Mazamars312/openfpga-pcengine-cd/), and it
+solves the same problem the other way: it puts a soft CPU in the fabric and
+loads it a 24KB firmware, `pce_mpu_bios.bin`, which runs the drive in software
+much as `pcecdd.cpp` runs on MiSTer's Linux host. This fork does it in RTL
+instead, because the point of the fork is the cheat engine and the two want the
+same room. Their manifest is prior art this leaned on: the cue plus bin data
+slot layout here, slot IDs included, was checked against theirs, and so was the
+`version_required` floor. See `docs/CD-PLAN.md`.
 
 Still to build: **CD-DA streaming**, which is why Rondo is silent, and ADPCM,
 which is why it has no speech.
@@ -223,9 +244,10 @@ This core is other people's work with a cheat engine added.
 | | |
 |---|---|
 | [Gregory Estrade](https://github.com/Torlus/FPGAPCE) | FPGAPCE, the original, released into the public domain |
-| [srg320](https://github.com/srg320) and [greyrogue](https://github.com/greyrogue) | TurboGrafx16_MiSTer, the heavily modified MiSTer core |
+| [srg320](https://github.com/srg320) and [greyrogue](https://github.com/greyrogue) | TurboGrafx16_MiSTer, the heavily modified MiSTer core. Its `rtl/pce/cd/` is used here unchanged, and `cd_host.sv` is a reimplementation of srg320's `pcecdd.cpp` |
 | [agg23](https://github.com/agg23) | the Pocket port this forks, and analogue-pocket-utils |
 | [vanfanel](https://github.com/vanfanel/openfpga-pcengine) | fixes to that port, merged into it before this fork and present in this history |
+| [Mazamars312](https://github.com/Mazamars312/openfpga-pcengine-cd/) | the working Pocket PC Engine CD core. None of its RTL is used, but its `data.json` is the prior art the cue plus bin slot layout here was checked against |
 | [spiritualized1997](https://github.com/spiritualized1997) | the TG-16 icon the core icon is based on |
 | [libretro/libretro-database](https://github.com/libretro/libretro-database) | the cheat files themselves, CC-BY-SA-4.0, none of them shipped here |
 | [Analogue openFPGA](https://www.analogue.co/developer) | the Pocket framework |
