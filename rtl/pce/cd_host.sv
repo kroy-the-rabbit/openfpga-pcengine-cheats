@@ -104,6 +104,9 @@ module cd_host (
     input  wire [ 3:0] aud_err,
     input  wire [ 3:0] aud_wr,
     input  wire [ 3:0] aud_rd,
+    input  wire [ 3:0] aud_room,
+    input  wire [15:0] aud_ok,
+    input  wire [15:0] aud_bad,
     input  wire [31:0] aud_head,
     input  wire [ 7:0] aud_data,
     input  wire        aud_req,
@@ -822,7 +825,10 @@ module cd_host (
   //                                last non-zero fetch result
   //   L00000E51 A00838830          the LBA asked for and the byte offset it
   //                                was turned into
-  //   B00000000                    the first four bytes handed to the core
+  //   A0123 E0004 K2 W3R1 U2 N2   audio reads that worked, reads that failed,
+  //                                last failure code, the two ring pointers,
+  //                                and how full the ring looks from the
+  //                                fetcher's side and the reader's
   //   Q 01 40 00 02 12 34 P1 N8    the six bytes of the last audio command,
   //                                then playing, then chunks buffered
   //   S0088E830 X0093F000          the audio start and end byte offsets
@@ -835,7 +841,7 @@ module cd_host (
   // Font indices are ASCII - 32, matching cheat_font.
   localparam [5:0] SP = 6'd0, A_ = 6'd33, B_ = 6'd34, C_ = 6'd35, D_ = 6'd36,
                    E_ = 6'd37, F_ = 6'd38, H_ = 6'd40, L_ = 6'd44, N_ = 6'd46,
-                   G_ = 6'd39, K_ = 6'd43,
+                   G_ = 6'd39, K_ = 6'd43, U_ = 6'd53,
                    O_ = 6'd47, P_ = 6'd48, Q_ = 6'd49, R_ = 6'd50, S_ = 6'd51,
                    T_ = 6'd52, W_ = 6'd55, X_ = 6'd56;
 
@@ -901,9 +907,12 @@ module cd_host (
   };
 
   wire [155:0] row3 = {
-      B_, hx8(sec_head), SP,
+      A_, hx4(aud_ok), SP,
+      E_, hx4(aud_bad), SP,
+      K_, hx(aud_err), SP,
       W_, hx(aud_wr), R_, hx(aud_rd), SP,
-      G_, hx8(aud_head), SP, SP
+      U_, hx(aud_room), SP,
+      N_, hx(aud_level), SP
   };
 
   // The audio command as it arrived: byte 1, byte 9, then bytes 2 to 5. Byte
@@ -914,15 +923,13 @@ module cd_host (
       Q_, SP, hx2(aud_cdb[47:40]), SP, hx2(aud_cdb[39:32]), SP,
               hx2(aud_cdb[31:24]), SP, hx2(aud_cdb[23:16]), SP,
               hx2(aud_cdb[15:8]),  SP, hx2(aud_cdb[7:0]),   SP,
-      P_, hx({3'd0, aud_play}), SP,
-      N_, hx(aud_level), SP
+      P_, hx({3'd0, aud_play}), SP, SP, SP, SP
   };
 
   wire [155:0] row5 = {
       S_, hx8(aud_start), SP,
-      X_, hx8(aud_end), SP,
-      K_, hx(aud_err),
-      SP, SP, SP, SP
+      X_, hx8(aud_end),
+      SP, SP, SP, SP, SP, SP, SP
   };
 
   // The counters run in this clock and the overlay reads them in another, so

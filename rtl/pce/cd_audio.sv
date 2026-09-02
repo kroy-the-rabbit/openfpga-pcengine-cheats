@@ -84,6 +84,9 @@ module cd_audio #(
     output wire [ 3:0] level,       // chunks buffered, for the overlay
     output wire [ 3:0] dbg_wr,      // the two pointers, not just their gap
     output wire [ 3:0] dbg_rd,
+    output wire [ 3:0] dbg_room,    // occupancy as the FETCHER sees it
+    output reg  [15:0] dbg_ok,      // reads that returned zero
+    output reg  [15:0] dbg_bad,     // reads that did not
     output reg  [31:0] dbg_head,    // first frame drained after a restart
     output reg  [ 3:0] err
 );
@@ -135,6 +138,15 @@ module cd_audio #(
 
   assign dbg_wr = wr_in_sys;
   assign dbg_rd = rd_chunk;
+
+  // The fetcher's own view of how full the ring is, brought back so it can be
+  // compared with the reader's. Both are the difference of the same two
+  // counters, each seen through the opposite crossing: if they disagree, the
+  // Gray crossing is the fault rather than the transport, and that is the one
+  // hypothesis the other counters cannot separate.
+  wire [3:0] room_sys;
+  synch_3 #(.WIDTH(4)) s_room (used_74, room_sys, clk_sys);
+  assign dbg_room = room_sys;
   wire have_room = (used_74 < 4'd8);
 
   // ---- restart, crossed into the bridge clock ----------------------------
@@ -180,6 +192,8 @@ module cd_audio #(
       wr_chunk <= 4'd0;
       err      <= 4'd0;
       rst_pend <= 1'b0;
+      dbg_ok   <= 16'd0;
+      dbg_bad  <= 16'd0;
     end else begin
       // A restart is recorded here and applied below, never taken mid
       // transaction. This module is filling the ring almost continuously, so
@@ -216,7 +230,15 @@ module cd_audio #(
         A_WAIT: begin
           if (cmd_ack) cmd_req <= 1'b0;
           if (cmd_done) begin
-            if (cmd_result != 16'd0) err <= cmd_result[3:0];
+            // Counted, not merely remembered. `err` is sticky, so on its own
+            // it cannot say whether one read failed or every read after the
+            // first, and that difference is the whole diagnosis.
+            if (cmd_result != 16'd0) begin
+              err     <= cmd_result[3:0];
+              dbg_bad <= dbg_bad + 16'd1;
+            end else begin
+              dbg_ok  <= dbg_ok + 16'd1;
+            end
             fetch_at <= fetch_at + CHUNK;
             wr_chunk <= wr_chunk + 4'd1;
             astate   <= A_IDLE;
