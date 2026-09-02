@@ -18,12 +18,19 @@
 // against a drain of one word per tick means the FIFO sits wherever it started
 // and neither end has to know about the other.
 //
-// ---- the byte order is already right ----
+// ---- the byte order, which was wrong for four builds ----
 //
 // cd.vhd puts byte 0 at FIFO_D[7:0] and reads FIFO_Q[15:0] as left, so a
-// stereo frame wants L-low, L-high, R-low, R-high. That is what Redbook stores
-// and what is in the bin, so the sectors stream out verbatim: no swapping, no
-// sign fixing, no deinterleaving.
+// stereo frame wants the file's bytes in file order: no swapping, no sign
+// fixing, no deinterleaving.
+//
+// The trap is that "file order" is not "low bits first". The bridge writes
+// big-endian into a word, so byte 0 of the file arrives at bits [31:24] of the
+// ring word; cd_fetch says so in as many words and its lane mux starts there
+// too. Emitting [7:0] first therefore sends each frame out backwards, swapping
+// left with right and byte-swapping both samples. Everything else measured
+// correct while it did that: the offsets, the ring contents, the fetch rate,
+// the read cost. Byte-swapped PCM is just static.
 //
 // ---- the ring ----
 //
@@ -348,11 +355,17 @@ module cd_audio #(
       fstep <= fstep + 3'd1;
       if (fstep[0]) begin           // odd steps strobe, even ones stay low
         aud_req  <= 1'b1;
+        // Byte 0 of the file is bits [31:24] of the ring word, not [7:0]: the
+        // bridge writes big-endian into a word because core_top ties
+        // bridge_endian_little low, which is why cd_fetch's lane mux starts at
+        // [31:24] as well. Emitting low bits first sent every stereo frame out
+        // backwards, which swaps left with right and byte-swaps both samples.
+        // That is static, and it is what this was doing.
         case (fstep[2:1])
-          2'd0: aud_data <= frame[7:0];
-          2'd1: aud_data <= frame[15:8];
-          2'd2: aud_data <= frame[23:16];
-          default: aud_data <= frame[31:24];
+          2'd0: aud_data <= frame[31:24];
+          2'd1: aud_data <= frame[23:16];
+          2'd2: aud_data <= frame[15:8];
+          default: aud_data <= frame[7:0];
         endcase
       end
       if (fstep == 3'd7) begin
