@@ -108,6 +108,7 @@ module cd_host (
     input  wire [15:0] aud_ok,
     input  wire [15:0] aud_bad,
     input  wire [15:0] aud_secs,
+    input  wire [15:0] aud_busy_ms,
     input  wire [31:0] aud_head,
     input  wire [ 7:0] aud_data,
     input  wire        aud_req,
@@ -830,8 +831,12 @@ module cd_host (
   //                                last failure code, the two ring pointers,
   //                                and how full the ring looks from the
   //                                fetcher's side and the reader's
-  //   Q 01 40 00 02 12 34 P1 N8    the six bytes of the last audio command,
-  //                                then playing, then chunks buffered
+  //   Q 01 40 P1 T0005 B0140      the two mode bytes of the last audio
+  //                                command, whether it is playing, seconds
+  //                                spent playing, and milliseconds the
+  //                                transport held a read. Reads over seconds
+  //                                is the chunk rate and should be 86;
+  //                                milliseconds over reads is what one costs.
   //   S0088E830 X0093F000 T0011    the audio start and end byte offsets, and
   //                                seconds since reset. Reads divided by
   //                                seconds should be 86: that is 176,400
@@ -925,16 +930,16 @@ module cd_host (
   // rather than into a comment.
   wire [155:0] row4 = {
       Q_, SP, hx2(aud_cdb[47:40]), SP, hx2(aud_cdb[39:32]), SP,
-              hx2(aud_cdb[31:24]), SP, hx2(aud_cdb[23:16]), SP,
-              hx2(aud_cdb[15:8]),  SP, hx2(aud_cdb[7:0]),   SP,
-      P_, hx({3'd0, aud_play}), SP, SP, SP, SP
+      P_, hx({3'd0, aud_play}), SP,
+      T_, hx4(aud_secs), SP,
+      B_, hx4(aud_busy_ms),
+      SP, SP, SP, SP
   };
 
   wire [155:0] row5 = {
       S_, hx8(aud_start), SP,
-      X_, hx8(aud_end), SP,
-      T_, hx4(aud_secs),
-      SP
+      X_, hx8(aud_end),
+      SP, SP, SP, SP, SP, SP, SP
   };
 
   // The counters run in this clock and the overlay reads them in another, so
