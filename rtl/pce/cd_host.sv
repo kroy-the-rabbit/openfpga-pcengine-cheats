@@ -107,6 +107,7 @@ module cd_host (
     input  wire [ 3:0] aud_room,
     input  wire [15:0] aud_ok,
     input  wire [15:0] aud_bad,
+    input  wire [15:0] aud_secs,
     input  wire [31:0] aud_head,
     input  wire [ 7:0] aud_data,
     input  wire        aud_req,
@@ -831,7 +832,10 @@ module cd_host (
   //                                fetcher's side and the reader's
   //   Q 01 40 00 02 12 34 P1 N8    the six bytes of the last audio command,
   //                                then playing, then chunks buffered
-  //   S0088E830 X0093F000          the audio start and end byte offsets
+  //   S0088E830 X0093F000 T0011    the audio start and end byte offsets, and
+  //                                seconds since reset. Reads divided by
+  //                                seconds should be 86: that is 176,400
+  //                                bytes a second in 2048 byte chunks.
   //
   // The last two are the ones that matter: rows 2 and 3 together say what was
   // asked for, where it landed, and whether what came back is what is there.
@@ -928,8 +932,9 @@ module cd_host (
 
   wire [155:0] row5 = {
       S_, hx8(aud_start), SP,
-      X_, hx8(aud_end),
-      SP, SP, SP, SP, SP, SP, SP
+      X_, hx8(aud_end), SP,
+      T_, hx4(aud_secs),
+      SP
   };
 
   // The counters run in this clock and the overlay reads them in another, so

@@ -87,6 +87,7 @@ module cd_audio #(
     output wire [ 3:0] dbg_room,    // occupancy as the FETCHER sees it
     output reg  [15:0] dbg_ok,      // reads that returned zero
     output reg  [15:0] dbg_bad,     // reads that did not
+    output reg  [15:0] dbg_secs,    // seconds of clk_sys since reset
     output reg  [31:0] dbg_head,    // first frame drained after a restart
     output reg  [ 3:0] err
 );
@@ -247,6 +248,24 @@ module cd_audio #(
 
         default: astate <= A_IDLE;
       endcase
+    end
+  end
+
+  // ---- a wall clock, purely so a rate can be read off the overlay ---------
+  // The counters say the ring never gets ahead, and that has two causes with
+  // identical symptoms: the fetcher too slow, or the drain too fast. Neither
+  // can be told from a count without knowing how long it took. Correct
+  // playback is 176,400 bytes a second, which is 86 chunks: if reads divided
+  // by seconds comes out near 86 the rate is right and the fault is elsewhere,
+  // well under and the transport is the limit, well over and this module is
+  // draining faster than 44.1 kHz.
+  reg [25:0] sec_div = 0;
+  always @(posedge clk_sys) begin
+    if (sec_div == 26'd42954544) begin
+      sec_div  <= 26'd0;
+      dbg_secs <= dbg_secs + 16'd1;
+    end else begin
+      sec_div <= sec_div + 26'd1;
     end
   end
 

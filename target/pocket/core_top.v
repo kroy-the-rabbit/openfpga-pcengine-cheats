@@ -941,7 +941,7 @@ module core_top (
   wire [31:0] cd_aud_start, cd_aud_end;
   wire [ 3:0] cd_aud_level;
   wire [ 3:0] cd_aud_err, cd_aud_wr_dbg, cd_aud_rd_dbg, cd_aud_room;
-  wire [15:0] cd_aud_ok, cd_aud_bad;
+  wire [15:0] cd_aud_ok, cd_aud_bad, cd_aud_secs;
   wire [31:0] cd_aud_head;
   wire [ 7:0] cd_aud_data;
   wire        cd_aud_req, cd_aud_busy, cd_aud_dm;
@@ -1017,6 +1017,7 @@ module core_top (
       .aud_room   (cd_aud_room),
       .aud_ok     (cd_aud_ok),
       .aud_bad    (cd_aud_bad),
+      .aud_secs   (cd_aud_secs),
       .aud_head   (cd_aud_head),
       .aud_data   (cd_aud_data),
       .aud_req    (cd_aud_req),
@@ -1062,6 +1063,7 @@ module core_top (
       .dbg_room(cd_aud_room),
       .dbg_ok  (cd_aud_ok),
       .dbg_bad (cd_aud_bad),
+      .dbg_secs(cd_aud_secs),
       .dbg_head(cd_aud_head),
       .err     (cd_aud_err)
   );
