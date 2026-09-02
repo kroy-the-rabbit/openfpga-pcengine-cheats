@@ -33,44 +33,6 @@
         "value": 1
       },
       {
-        "name": "DEBUG SD Read Probe",
-        "id": 83,
-        "type": "check",
-        "enabled": true,
-        "address": "0x0000040C",
-        "persist": false,
-        "writeonly": true,
-        "defaultval": 0,
-        "value": 1
-      },
-      {
-        "name": "DEBUG Probe Chunk",
-        "id": 84,
-        "type": "slider_u32",
-        "enabled": true,
-        "address": "0x00000410",
-        "persist": false,
-        "writeonly": true,
-        "defaultval": 0,
-        "graphical": {
-          "min": 0,
-          "max": 2,
-          "adjust_small": 1,
-          "adjust_large": 1
-        }
-      },
-      {
-        "name": "DEBUG Path Probe",
-        "id": 85,
-        "type": "check",
-        "enabled": true,
-        "address": "0x00000414",
-        "persist": false,
-        "writeonly": true,
-        "defaultval": 0,
-        "value": 1
-      },
-      {
         "name": "Use Turbo Tap",
         "id": 20,
         "type": "check",
@@ -176,6 +138,17 @@
         "type": "check",
         "enabled": true,
         "address": "0x00000304",
+        "persist": true,
+        "writeonly": true,
+        "defaultval": 0,
+        "value": 1
+      },
+      {
+        "name": "CD Audio Boost",
+        "id": 62,
+        "type": "check",
+        "enabled": true,
+        "address": "0x00000308",
         "persist": true,
         "writeonly": true,
         "defaultval": 0,

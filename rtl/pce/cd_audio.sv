@@ -96,6 +96,13 @@ module cd_audio #(
     output reg  [15:0] dbg_bad,     // reads that did not
     output reg  [15:0] dbg_secs,    // seconds spent PLAYING, not since reset
     output reg  [15:0] dbg_busy,    // milliseconds the transport held a read
+
+    // How far into the play region the head is, in sectors. READSUBQ needs it:
+    // reporting the data read head while audio plays tells a game syncing to
+    // the music the position of something else entirely. A CD-DA sector is
+    // 2352 bytes, which is 588 stereo frames exactly, so this is a counter and
+    // not a divide. 19 bits covers a whole disc.
+    output reg  [18:0] sector,
     output reg  [31:0] dbg_head,    // first frame drained after a restart
     output reg  [ 3:0] err
 );
@@ -315,6 +322,7 @@ module cd_audio #(
   reg [ 8:0] rd_word = 0;           // word within the chunk
   reg [31:0] frame;
   reg        head_pend = 1'b1;
+  reg [ 9:0] frame_in_sector = 0;
   reg [ 2:0] fstep = 0;             // 0 idle, then 4 bytes over 8 clocks
   reg [31:0] pos;                   // byte offset of the next frame
 
@@ -339,6 +347,8 @@ module cd_audio #(
       ended    <= 1'b0;
       pos      <= 32'd0;
       priming  <= 1'b1;
+      sector   <= 19'd0;
+      frame_in_sector <= 10'd0;
     end else if (restart) begin
       rd_chunk <= 4'd0;
       rd_word  <= skip_words;
@@ -348,6 +358,8 @@ module cd_audio #(
       pos       <= start_off;
       priming   <= 1'b1;
       head_pend <= 1'b1;
+      sector    <= 19'd0;
+      frame_in_sector <= 10'd0;
       aud_dm    <= 1'b1;            // resync cd.vhd's byte counter
     end else if (fstep != 3'd0) begin
       // Mid frame. Bytes go out low to high, which is the order cd.vhd packs
@@ -385,6 +397,13 @@ module cd_audio #(
       aud_busy <= 1'b1;
       pos      <= pos + 32'd4;
       if (pos + 32'd4 >= end_off) ended <= 1'b1;
+
+      if (frame_in_sector == 10'd587) begin
+        frame_in_sector <= 10'd0;
+        sector          <= sector + 19'd1;
+      end else begin
+        frame_in_sector <= frame_in_sector + 10'd1;
+      end
 
       if (rd_word == CHUNK_WORDS - 9'd1) begin
         rd_word  <= 9'd0;

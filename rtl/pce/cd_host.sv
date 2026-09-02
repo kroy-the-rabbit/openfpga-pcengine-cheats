@@ -100,6 +100,7 @@ module cd_host (
     output reg  [31:0] aud_start,     // byte offset of the first sample
     output reg  [31:0] aud_end,       // byte offset one past the last
     input  wire        aud_ended,
+    input  wire [18:0] aud_sector,     // sectors played since the last restart
     input  wire [ 3:0] aud_level,
     input  wire [ 3:0] aud_err,
     input  wire [ 3:0] aud_wr,
@@ -194,6 +195,13 @@ module cd_host (
   reg [31:0] msf_acc;
   reg [ 7:0] msf_m, msf_s, msf_f;
   reg        msf_busy, msf_phase;
+  reg        msf_pass;              // 0 relative, 1 absolute, for READSUBQ
+
+  // Which head READSUBQ describes. While audio is playing or paused it is the
+  // music; otherwise the last data read.
+  wire        subq_playing = (dstate == DS_PLAY) || (dstate == DS_PAUSE);
+  wire [31:0] subq_lba = subq_playing ? (aud_lba0 + {13'd0, aud_sector}) : lba;
+  wire [31:0] subq_trk = subq_playing ? aud_trk_lba : trk_lba;
 
   function automatic [6:0] bcd_to_bin(input [7:0] v);
     begin
@@ -262,6 +270,13 @@ module cd_host (
   reg [31:0] scan_target;
   reg [ 1:0] off_mode;
 
+  // Where the audio head is, kept so READSUBQ can answer about the music
+  // rather than about the last data sector read. Captured when a play start is
+  // resolved, and added to cd_audio's sector count.
+  reg [31:0] aud_lba0;              // LBA the play region starts at
+  reg [31:0] aud_trk_lba;           // LBA its track starts at, for relative MSF
+  reg [ 6:0] aud_track;
+
   reg [31:0] apos;                  // the LBA an audio command named
   reg [15:0] apos_ms;               // minutes and seconds, part way there
   reg [ 1:0] apos_step;
@@ -301,7 +316,10 @@ module cd_host (
       fetch_req  <= 1'b0;
       msf_busy   <= 1'b0;
       pend_check <= 1'b0;
-      aud_play   <= 1'b0;
+      aud_play    <= 1'b0;
+      aud_lba0    <= 32'd0;
+      aud_trk_lba <= 32'd0;
+      aud_track   <= 7'd1;
       aud_start  <= 32'd0;
       aud_end    <= 32'd0;
       aud_cdb    <= 48'd0;
@@ -333,6 +351,19 @@ module cd_host (
       // Placed ahead of the case so a command arriving in the same cycle
       // still wins: last assignment inside one always block takes effect.
       if (dstate == DS_NODISC && track_count != 7'd0) dstate <= DS_IDLE;
+
+      // The end of a play region. Nothing consumed this, so dstate stayed
+      // DS_PLAY for ever once a track finished and a game polling READSUBQ for
+      // track end would have waited for ever. Ahead of the case for the same
+      // reason as the promotion above: a command arriving this cycle wins.
+      //
+      // It stops rather than repeating. The end-behaviour byte is recorded in
+      // cdda_mode but what its values mean is not established, and a game that
+      // wants a track again re-issues SAPSP.
+      if (aud_ended && dstate == DS_PLAY) begin
+        aud_play <= 1'b0;
+        dstate   <= DS_IDLE;
+      end
 
       // ---- the MSF converter, running whenever it has been started -------
       if (msf_busy) begin
@@ -502,15 +533,18 @@ module cd_host (
               rsp[0] <= (dstate == DS_PAUSE) ? 8'h02
                       : (dstate == DS_PLAY)  ? 8'h00 : 8'h03;
               rsp[1] <= 8'h00;               // control/ADR, always zero
-              rsp[2] <= bcd({1'b0, track});
+              rsp[2] <= bcd({1'b0, subq_playing ? aud_track : track});
               rsp[3] <= 8'h01;               // index, hardcoded
-              // Relative and absolute MSF want two conversions; v1 reports the
-              // absolute position twice rather than running the converter
-              // twice, which no known title checks.
-              msf_acc   <= lba + 32'd150;
+              // Relative first, then absolute: two passes of the converter.
+              // Before this it ran once and put the absolute position in both
+              // fields, and that position was `lba`, the data read head, which
+              // during playback is wherever the last READ6 left it rather than
+              // where the music is.
+              msf_acc   <= subq_lba - subq_trk;
               msf_m     <= 8'd0; msf_s <= 8'd0; msf_f <= 8'd0;
               msf_phase <= 1'b0;
               msf_busy  <= 1'b1;
+              msf_pass  <= 1'b0;
               rsp_len   <= 5'd10;
               state     <= S_MSF;
             end
@@ -534,11 +568,25 @@ module cd_host (
             rsp[1] <= bcd(msf_s);
             rsp[2] <= bcd(msf_f);
             // rsp[3] is the control nibble for subcommand 2, already set
+            state  <= S_PUSH;
+          end else if (!msf_pass) begin
+            // Relative is done. Run it again for the absolute position, which
+            // carries the 150 sector lead-in offset that relative does not.
+            rsp[4]    <= bcd(msf_m);
+            rsp[5]    <= bcd(msf_s);
+            rsp[6]    <= bcd(msf_f);
+            msf_acc   <= subq_lba + 32'd150;
+            msf_m     <= 8'd0; msf_s <= 8'd0; msf_f <= 8'd0;
+            msf_phase <= 1'b0;
+            msf_busy  <= 1'b1;
+            msf_pass  <= 1'b1;
+            state     <= S_MSF;
           end else begin
-            rsp[4] <= bcd(msf_m);  rsp[5] <= bcd(msf_s);  rsp[6] <= bcd(msf_f);
-            rsp[7] <= bcd(msf_m);  rsp[8] <= bcd(msf_s);  rsp[9] <= bcd(msf_f);
+            rsp[7] <= bcd(msf_m);
+            rsp[8] <= bcd(msf_s);
+            rsp[9] <= bcd(msf_f);
+            state  <= S_PUSH;
           end
-          state <= S_PUSH;
         end
 
         // ------------------------------ an audio position becomes an LBA ---
@@ -678,6 +726,9 @@ module cd_host (
               case (off_mode)
                 OFF_ASTART: begin
                   aud_start   <= trk_base + sec_scaled;
+                  aud_lba0    <= scan_target;
+                  aud_trk_lba <= trk_lba;
+                  aud_track   <= track;
                   // Nothing has said where to stop yet. SAPEP usually follows
                   // immediately; until it does, play to the end of the file.
                   aud_end     <= 32'hFFFF_FFFF;

@@ -441,12 +441,21 @@ module core_top (
   // bridge target commands
   // synchronous to clk_74a
 
-  // Set to 0 to take the SD read probe out of the build entirely: the module,
-  // the target command traffic it generates and the overlay row that prints
-  // its answer all fold away, because probe_read stops being driven and
-  // cheat_osd's DIAG branch loses its inputs. This has to be 0 before anything
-  // is released. See docs/CD-PLAN.md P0.
-  localparam CD_PROBE = 1;
+  // The SD read probe and the whole diagnostic overlay. At 0 the probe module,
+  // the target command traffic it generates, cd_diag and every counter in
+  // cd_host and cd_audio that only fed the overlay all fold away, because
+  // nothing reads them any more.
+  //
+  // Kept as a switch rather than deleted: this is the instrument that measured
+  // the transport in P0 and that found the CD-DA byte order in P4, and turning
+  // it back on wants a rebuild but no edits beyond restoring the three DEBUG
+  // entries to interact.json. The bridge decode for them at 0x40C, 0x410 and
+  // 0x414 is deliberately left in place for that reason.
+  //
+  // Note that dataslot_path is NOT inside this: opening the bin the cue names
+  // is how a disc is read, not a diagnostic, and it runs from the cue being
+  // parsed. See docs/CD-PLAN.md 5g.
+  localparam CD_PROBE = 0;
 
   wire         probe_req, path_req;
   wire [ 15:0] probe_cmd, path_cmd;
@@ -938,6 +947,7 @@ module core_top (
   wire [ 3:0] cd_fetch_err_sys;
 
   wire        cd_aud_play, cd_aud_restart, cd_aud_ended;
+  wire [18:0] cd_aud_sector;
   wire [31:0] cd_aud_start, cd_aud_end;
   wire [ 3:0] cd_aud_level;
   wire [ 3:0] cd_aud_err, cd_aud_wr_dbg, cd_aud_rd_dbg, cd_aud_room;
@@ -1010,6 +1020,7 @@ module core_top (
       .aud_start  (cd_aud_start),
       .aud_end    (cd_aud_end),
       .aud_ended  (cd_aud_ended),
+      .aud_sector (cd_aud_sector),
       .aud_level  (cd_aud_level),
       .aud_err    (cd_aud_err),
       .aud_wr     (cd_aud_wr_dbg),
@@ -1038,6 +1049,7 @@ module core_top (
       .start_off(cd_aud_start),
       .end_off  (cd_aud_end),
       .ended    (cd_aud_ended),
+      .sector   (cd_aud_sector),
 
       .aud_data(cd_aud_data),
       .aud_req (cd_aud_req),
