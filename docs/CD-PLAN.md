@@ -1015,9 +1015,13 @@ though it were seconds of playback. A rate needs both of its units checked.
    2026-09-01: it holds.** P1's `R0` is a sector read out of the slot `0x0192`
    opened, issued as a separate command well after the open returned. What is
    still unmeasured is how long a reopen costs, which §6 now carries.
-3. Does slot 0 double as the System Card BIOS slot? The System Card is a 256KB
-   HuCard image going to the same SDRAM ROM space, which is how MiSTer treats
-   `cd_bios.rom`. A separate named slot is friendlier but costs a slot.
+3. ~~Does slot 0 double as the System Card BIOS slot?~~ **Answered 2026-09-02:
+   it does, and it costs no slot.** The System Card is a HuCard and goes to the
+   same ROM space, so slot 0 takes either and carries `filename` plus
+   `alternate_filenames` naming the five cards. Choosing a `.pce` fills the
+   slot explicitly; choosing a `.cue` leaves it to the default. A finished cue
+   load also restarts the machine, because the CPU can otherwise boot and read
+   K[7] as no CD unit attached before the cue has arrived.
 4. Does Super System Card RAM want to be nonvolatile alongside BRM, or is BRM
    in the existing save slot enough?
 5. Which System Card does the core require? Rondo needs 3.0, and the US dump has

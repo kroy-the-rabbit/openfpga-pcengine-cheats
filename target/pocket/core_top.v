@@ -332,6 +332,19 @@ module core_top (
       reset_delay <= reset_delay - 1;
     end
 
+    // A disc finishing its load restarts the machine, exactly as the menu's
+    // reset does. Slot 0 defaults to the System Card now, so the CPU can come
+    // out of reset and decide there is no CD unit attached before the cue has
+    // arrived: K[7] of the joypad port is that flag and the System Card reads
+    // it at boot. Restarting once the cue has parsed makes the order the two
+    // slots happen to load in stop mattering.
+    //
+    // The falling edge, not the rising one. cue_reset takes the rising edge to
+    // clear the CD blocks before the new cue is parsed; this wants the moment
+    // parsing is done.
+    cue_dl_74 <= cue_download;
+    if (cue_dl_74 && !cue_download) reset_delay <= 32'h100000;
+
     if (bridge_wr) begin
       casex (bridge_addr)
         32'h50: begin
@@ -1333,6 +1346,7 @@ module core_top (
   reg [1:0] master_audio_boost = 0;
 
   reg [31:0] reset_delay = 0;
+  reg        cue_dl_74 = 0;
 
   // The menu switch that runs the SD read probe. Held rather than pulsed: the
   // probe edge-detects it, and clearing it releases the result. probe_chunk

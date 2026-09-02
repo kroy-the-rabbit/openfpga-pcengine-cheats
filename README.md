@@ -109,6 +109,13 @@ Discs must be **cue plus bin**. A bare `.iso` is the data track only, so a game
 boots and plays silent, and `.chd` is compressed in a way that cannot be
 seek-addressed at all: convert with `chdman extractcd` first.
 
+**Put a System Card in `Assets/pce/common/`.** Slot 0 takes a HuCard or a
+System Card, because on real hardware the System Card is a HuCard, and it
+defaults to `bios_3_0_usa.pce` with `bios_3_0_jap.pce` and the 2.0 and 1.0
+cards as fallbacks. Pick a `.pce` and it loads that; pick a `.cue` and slot 0
+falls back to the default, so a disc needs no second trip through the file
+browser. Rondo wants a 3.0 card.
+
 This work is why `core.json` now asks for APF `version_required 2.3` rather
 than `1.1`. **A Pocket on older firmware will not load this core.**
 
