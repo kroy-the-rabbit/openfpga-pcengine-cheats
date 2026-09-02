@@ -940,6 +940,8 @@ module core_top (
   wire        cd_aud_play, cd_aud_restart, cd_aud_ended;
   wire [31:0] cd_aud_start, cd_aud_end;
   wire [ 3:0] cd_aud_level;
+  wire [ 3:0] cd_aud_err, cd_aud_wr_dbg, cd_aud_rd_dbg;
+  wire [31:0] cd_aud_head;
   wire [ 7:0] cd_aud_data;
   wire        cd_aud_req, cd_aud_busy, cd_aud_dm;
 
@@ -1008,6 +1010,10 @@ module core_top (
       .aud_end    (cd_aud_end),
       .aud_ended  (cd_aud_ended),
       .aud_level  (cd_aud_level),
+      .aud_err    (cd_aud_err),
+      .aud_wr     (cd_aud_wr_dbg),
+      .aud_rd     (cd_aud_rd_dbg),
+      .aud_head   (cd_aud_head),
       .aud_data   (cd_aud_data),
       .aud_req    (cd_aud_req),
       .aud_busy   (cd_aud_busy),
@@ -1046,8 +1052,11 @@ module core_top (
       .cmd_done  (tcmd_done & sel_audio),
       .cmd_result(tcmd_result),
 
-      .level(cd_aud_level),
-      .err  ()
+      .level   (cd_aud_level),
+      .dbg_wr  (cd_aud_wr_dbg),
+      .dbg_rd  (cd_aud_rd_dbg),
+      .dbg_head(cd_aud_head),
+      .err     (cd_aud_err)
   );
 
   synch_3 #(

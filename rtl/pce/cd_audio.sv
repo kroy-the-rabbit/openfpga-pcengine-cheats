@@ -82,6 +82,9 @@ module cd_audio #(
     input  wire [15:0] cmd_result,
 
     output wire [ 3:0] level,       // chunks buffered, for the overlay
+    output wire [ 3:0] dbg_wr,      // the two pointers, not just their gap
+    output wire [ 3:0] dbg_rd,
+    output reg  [31:0] dbg_head,    // first frame drained after a restart
     output reg  [ 3:0] err
 );
 
@@ -129,6 +132,9 @@ module cd_audio #(
   assign level = used_sys;
 
   wire have_data = (used_sys != 4'd0);
+
+  assign dbg_wr = wr_in_sys;
+  assign dbg_rd = rd_chunk;
   wire have_room = (used_74 < 4'd8);
 
   // ---- restart, crossed into the bridge clock ----------------------------
@@ -161,6 +167,7 @@ module cd_audio #(
   // ---- the fetcher, in clk_74a -------------------------------------------
   localparam [1:0] A_IDLE = 2'd0, A_ISSUE = 2'd1, A_WAIT = 2'd2;
   reg [1:0] astate = A_IDLE;
+  reg       rst_pend = 1'b0;
 
   always @(posedge clk_74a) begin
     restart_tog_74_d <= restart_tog_74;
@@ -172,15 +179,23 @@ module cd_audio #(
       cmd_req  <= 1'b0;
       wr_chunk <= 4'd0;
       err      <= 4'd0;
-    end else if (restart_74) begin
-      // Drop everything in flight and refill from the new position. The read
-      // side has already reset its own pointer.
-      astate      <= A_IDLE;
-      cmd_req     <= 1'b0;
-      wr_chunk    <= 4'd0;
-      fetch_at    <= start_off & ~32'd511;
-      rst_ack_tog <= ~rst_ack_tog;
+      rst_pend <= 1'b0;
     end else begin
+      // A restart is recorded here and applied below, never taken mid
+      // transaction. This module is filling the ring almost continuously, so
+      // SAPSP nearly always lands while a read is in flight; abandoning it
+      // between `cmd_ack` and `cmd_done` throws the completion away, and the
+      // next read then waits in A_WAIT for a `done` that has already been and
+      // gone. The fetcher stops dead on the first SAPSP, which is what an
+      // empty ring with the drive reporting DS_PLAY looks like.
+      if (restart_74) rst_pend <= 1'b1;
+
+      if (rst_pend && astate == A_IDLE) begin
+        rst_pend    <= 1'b0;
+        wr_chunk    <= 4'd0;
+        fetch_at    <= start_off & ~32'd511;
+        rst_ack_tog <= ~rst_ack_tog;
+      end else
       case (astate)
         A_IDLE:
           if (have_room) begin
@@ -234,6 +249,7 @@ module cd_audio #(
   // between bytes.
   reg [ 8:0] rd_word = 0;           // word within the chunk
   reg [31:0] frame;
+  reg        head_pend = 1'b1;
   reg [ 2:0] fstep = 0;             // 0 idle, then 4 bytes over 8 clocks
   reg [31:0] pos;                   // byte offset of the next frame
 
@@ -264,9 +280,10 @@ module cd_audio #(
       fstep    <= 3'd0;
       aud_busy <= 1'b0;
       ended    <= 1'b0;
-      pos      <= start_off;
-      priming  <= 1'b1;
-      aud_dm   <= 1'b1;             // resync cd.vhd's byte counter
+      pos       <= start_off;
+      priming   <= 1'b1;
+      head_pend <= 1'b1;
+      aud_dm    <= 1'b1;            // resync cd.vhd's byte counter
     end else if (fstep != 3'd0) begin
       // Mid frame. Bytes go out low to high, which is the order cd.vhd packs
       // them and the order they sit in the file.
@@ -286,6 +303,13 @@ module cd_audio #(
       end
     end else if (ce_441 && play && !ended && !priming && have_data) begin
       frame    <= rq;
+      // The first frame out of the ring after a restart, which is the audio
+      // equivalent of the sector head: it says whether what the transport put
+      // in the ring is the music that is in the file at that offset.
+      if (head_pend) begin
+        dbg_head  <= rq;
+        head_pend <= 1'b0;
+      end
       fstep    <= 3'd1;
       aud_busy <= 1'b1;
       pos      <= pos + 32'd4;

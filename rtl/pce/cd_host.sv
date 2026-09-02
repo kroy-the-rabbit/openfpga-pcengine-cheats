@@ -101,6 +101,10 @@ module cd_host (
     output reg  [31:0] aud_end,       // byte offset one past the last
     input  wire        aud_ended,
     input  wire [ 3:0] aud_level,
+    input  wire [ 3:0] aud_err,
+    input  wire [ 3:0] aud_wr,
+    input  wire [ 3:0] aud_rd,
+    input  wire [31:0] aud_head,
     input  wire [ 7:0] aud_data,
     input  wire        aud_req,
     input  wire        aud_busy,
@@ -436,7 +440,6 @@ module cd_host (
               // The mask is what the reference applies anyway, dropping the
               // SCSI-1 LUN field in the top three bits.
               lba         <= {8'd0, cb(4'd1), cb(4'd2), cb(4'd3)} & 32'h001F_FFFF;
-              last_lba    <= {8'd0, cb(4'd1), cb(4'd2), cb(4'd3)} & 32'h001F_FFFF;
               scan_target <= {8'd0, cb(4'd1), cb(4'd2), cb(4'd3)} & 32'h001F_FFFF;
               off_mode    <= OFF_DATA;
               cnt       <= (cb(4'd4) == 8'd0) ? 9'd256 : {1'b0, cb(4'd4)};
@@ -701,6 +704,10 @@ module cd_host (
           if (!fetch_req && !fetch_done) begin
             fetch_req <= 1'b1;
             last_off  <= fetch_offset;
+            // Per sector, not per command. Latching this at decode while
+            // last_off moved every sector made a 32 sector READ6 report two
+            // different points and look like an offset bug.
+            last_lba  <= lba;
             // Park the read address on byte 0 here rather than on the way
             // out. cd_fetch registers its read, so sec_data trails sec_addr
             // by a clock; parking it now means byte 0 is already presented
@@ -828,8 +835,9 @@ module cd_host (
   // Font indices are ASCII - 32, matching cheat_font.
   localparam [5:0] SP = 6'd0, A_ = 6'd33, B_ = 6'd34, C_ = 6'd35, D_ = 6'd36,
                    E_ = 6'd37, F_ = 6'd38, H_ = 6'd40, L_ = 6'd44, N_ = 6'd46,
-                   O_ = 6'd47, P_ = 6'd48, Q_ = 6'd49, S_ = 6'd51, T_ = 6'd52,
-                   X_ = 6'd56;
+                   G_ = 6'd39, K_ = 6'd43,
+                   O_ = 6'd47, P_ = 6'd48, Q_ = 6'd49, R_ = 6'd50, S_ = 6'd51,
+                   T_ = 6'd52, W_ = 6'd55, X_ = 6'd56;
 
   function automatic [5:0] hx(input [3:0] v);
     begin
@@ -893,8 +901,9 @@ module cd_host (
   };
 
   wire [155:0] row3 = {
-      B_, hx8(sec_head),
-      SP, SP, SP, SP, SP, SP, SP, SP, SP, SP, SP, SP, SP, SP, SP, SP, SP
+      B_, hx8(sec_head), SP,
+      W_, hx(aud_wr), R_, hx(aud_rd), SP,
+      G_, hx8(aud_head), SP, SP
   };
 
   // The audio command as it arrived: byte 1, byte 9, then bytes 2 to 5. Byte
@@ -911,8 +920,9 @@ module cd_host (
 
   wire [155:0] row5 = {
       S_, hx8(aud_start), SP,
-      X_, hx8(aud_end),
-      SP, SP, SP, SP, SP, SP, SP
+      X_, hx8(aud_end), SP,
+      K_, hx(aud_err),
+      SP, SP, SP, SP
   };
 
   // The counters run in this clock and the overlay reads them in another, so
