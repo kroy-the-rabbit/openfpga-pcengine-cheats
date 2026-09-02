@@ -70,9 +70,9 @@ module cd_host (
     input  wire        dout_send,
     output reg  [ 7:0] data,
     output reg         data_wr,
-    output wire        audio_wr,
+    output reg         audio_wr,
     input  wire        data_end,         // one-clock pulse
-    output wire        dm,
+    output reg         dm,
     input  wire        cd_reset,         // level
     output wire        region,
 
@@ -94,17 +94,26 @@ module cd_host (
 
     input  wire [ 3:0] fetch_err,      // last non-zero result from cd_fetch
 
+    // ---- CD-DA, to cd_audio ----
+    output reg         aud_play,      // level
+    output reg         aud_restart,   // one clock
+    output reg  [31:0] aud_start,     // byte offset of the first sample
+    output reg  [31:0] aud_end,       // byte offset one past the last
+    input  wire        aud_ended,
+    input  wire [ 3:0] aud_level,
+    input  wire [ 7:0] aud_data,
+    input  wire        aud_req,
+    input  wire        aud_busy,
+    input  wire        aud_dm,
+
     // Diagnostic block for the overlay: four rows of 26 characters, row 0 in
     // the most significant 156 bits. Composed here so the whole of it lives in
     // one file. See the assembly at the foot.
-    output wire [623:0] line
+    output wire [935:0] line
 );
 
-  // v1 leaves these constant. Region 0 is Japan, which is what Rondo wants;
-  // dm resynchronises the CDDA byte packer and only matters once audio flows.
-  assign audio_wr = 1'b0;
-  assign dm       = 1'b0;
-  assign region   = 1'b0;
+  // Region 0 is Japan, which is what Rondo wants.
+  assign region = 1'b0;
 
   // ---- SCSI opcodes ----------------------------------------------------
   localparam [7:0] OP_TESTUNIT    = 8'h00;
@@ -147,6 +156,15 @@ module cd_host (
   // the bytes a command actually uses are read here, which sidesteps it.
   reg [95:0] cdb;
   wire [7:0] op = cdb[7:0];
+
+  // Bit fields want plain wires: `cb(4'd9)[7:6]` is legal SystemVerilog and
+  // Quartus's parser will not take a part-select applied to a function call.
+  wire [7:0] cdb1 = cdb[15:8];
+  wire [7:0] cdb2 = cdb[23:16];
+  wire [7:0] cdb3 = cdb[31:24];
+  wire [7:0] cdb4 = cdb[39:32];
+  wire [7:0] cdb5 = cdb[47:40];
+  wire [7:0] cdb9 = cdb[79:72];
   function automatic [7:0] cb(input [3:0] i);
     begin
       cb = cdb[{4'd0, i} * 8 +: 8];
@@ -207,6 +225,8 @@ module cd_host (
   localparam [3:0] S_SETTLE   = 4'd10;
   localparam [3:0] S_FINDTRK  = 4'd11;  // which track holds this LBA
   localparam [3:0] S_OFFSET   = 4'd12;  // the offset multiply, pipelined
+  localparam [3:0] S_APOS     = 4'd13;  // an audio position becoming an LBA
+  localparam [3:0] S_ATRK     = 4'd14;  // that position given as a track
 
   reg [ 3:0] state;
   reg [11:0] push_i;
@@ -226,6 +246,18 @@ module cd_host (
   reg [ 1:0] off_step;
   reg [31:0] sec_index, sec_scaled;
 
+  // The track walk and the offset multiply serve three callers now: a data
+  // read, an audio start and an audio end. `scan_target` is what they agree
+  // on and `off_mode` is where the answer goes.
+  localparam [1:0] OFF_DATA = 2'd0, OFF_ASTART = 2'd1, OFF_AEND = 2'd2;
+  reg [31:0] scan_target;
+  reg [ 1:0] off_mode;
+
+  reg [31:0] apos;                  // the LBA an audio command named
+  reg [15:0] apos_ms;               // minutes and seconds, part way there
+  reg [ 1:0] apos_step;
+  reg [47:0] aud_cdb;               // the six bytes that named it, for the OSD
+
   // Counters and witnesses, for the diagnostic line only. Nothing reads them.
   reg [15:0] cmd_count, fetch_count;
   reg [ 7:0] last_op;
@@ -236,9 +268,15 @@ module cd_host (
 
   always @(posedge clk) begin
     // One-clock strobes, cleared every cycle and set where they are meant.
-    stat_get <= 1'b0;
-    dout_req <= 1'b0;
-    data_wr  <= 1'b0;
+    stat_get    <= 1'b0;
+    dout_req    <= 1'b0;
+    data_wr     <= 1'b0;
+    aud_restart <= 1'b0;
+
+    // cd.vhd edge detects both of these and shares one CD_DATA between them,
+    // so they are strobes here for the same reason data_wr is.
+    audio_wr    <= aud_req;
+    dm          <= aud_dm;
 
     if (reset || !cd_en) begin
       state      <= S_IDLE;
@@ -254,6 +292,11 @@ module cd_host (
       fetch_req  <= 1'b0;
       msf_busy   <= 1'b0;
       pend_check <= 1'b0;
+      aud_play   <= 1'b0;
+      aud_start  <= 32'd0;
+      aud_end    <= 32'd0;
+      aud_cdb    <= 48'd0;
+      off_mode   <= OFF_DATA;
       cmd_count  <= 16'd0;
       fetch_count<= 16'd0;
       last_op    <= 8'hFF;
@@ -392,8 +435,10 @@ module cd_host (
               // call is legal SystemVerilog and Quartus's parser rejects it.
               // The mask is what the reference applies anyway, dropping the
               // SCSI-1 LUN field in the top three bits.
-              lba       <= {8'd0, cb(4'd1), cb(4'd2), cb(4'd3)} & 32'h001F_FFFF;
-              last_lba  <= {8'd0, cb(4'd1), cb(4'd2), cb(4'd3)} & 32'h001F_FFFF;
+              lba         <= {8'd0, cb(4'd1), cb(4'd2), cb(4'd3)} & 32'h001F_FFFF;
+              last_lba    <= {8'd0, cb(4'd1), cb(4'd2), cb(4'd3)} & 32'h001F_FFFF;
+              scan_target <= {8'd0, cb(4'd1), cb(4'd2), cb(4'd3)} & 32'h001F_FFFF;
+              off_mode    <= OFF_DATA;
               cnt       <= (cb(4'd4) == 8'd0) ? 9'd256 : {1'b0, cb(4'd4)};
               dstate    <= DS_READ;
               scan_i    <= 7'd1;
@@ -411,27 +456,38 @@ module cd_host (
               state   <= S_STATUS;
             end
 
+            // Set audio playback start position. The address is given one of
+            // three ways and the top two bits of byte 9 say which; byte 1 non
+            // zero means play rather than seek and sit paused.
+            //
+            // This encoding is taken from the reference and has not been
+            // confirmed against a disc. The six bytes are put on the overlay
+            // for that reason: if a game addresses a track and gets silence,
+            // the row says what it actually asked for.
             OP_SAPSP: begin
-              cdda_mode  <= cb(4'd1);
-              cdda_start <= lba;
-              cdda_end   <= toc_end;
-              dstate     <= (cb(4'd1) == 8'h00) ? DS_PAUSE : DS_PLAY;
-              rsp_len    <= 5'd0;
-              state      <= S_STATUS;
+              aud_cdb   <= {cdb1, cdb9, cdb2, cdb3, cdb4, cdb5};
+              cdda_mode <= cdb1;
+              off_mode  <= OFF_ASTART;
+              apos_step <= 2'd0;
+              state     <= S_APOS;
             end
 
+            // Set audio playback end position. Same decode, and it does not
+            // disturb a stream already running: only where it stops.
             OP_SAPEP: begin
-              cdda_mode <= cb(4'd1);
-              dstate    <= (cb(4'd1) == 8'h00) ? DS_IDLE : DS_PLAY;
-              rsp_len   <= 5'd0;
-              state     <= S_STATUS;
+              aud_cdb   <= {cdb1, cdb9, cdb2, cdb3, cdb4, cdb5};
+              cdda_mode <= cdb1;
+              off_mode  <= OFF_AEND;
+              apos_step <= 2'd0;
+              state     <= S_APOS;
             end
 
             OP_PAUSE: begin
               // Unconditional GOOD, with no check that anything was playing.
-              dstate  <= DS_PAUSE;
-              rsp_len <= 5'd0;
-              state   <= S_STATUS;
+              dstate   <= DS_PAUSE;
+              aud_play <= 1'b0;
+              rsp_len  <= 5'd0;
+              state    <= S_STATUS;
             end
 
             OP_READSUBQ: begin
@@ -477,6 +533,68 @@ module cd_host (
           state <= S_PUSH;
         end
 
+        // ------------------------------ an audio position becomes an LBA ---
+        // Three cycles rather than one expression: the minutes-and-seconds
+        // multiply feeding the seventy-five multiply feeding the subtract is
+        // exactly the chain shape that cost P2 a build, and this clock has
+        // 93 ps of slack to spare.
+        S_APOS: begin
+          case (cdb9[7:6])
+            2'b00: begin
+              // A plain LBA, big endian, in bytes 3 to 5.
+              apos      <= {8'd0, cdb3, cdb4, cdb5};
+              apos_step <= 2'd2;
+            end
+            2'b10: begin
+              // A track number in BCD. Read its start out of the table rather
+              // than compute anything.
+              toc_track <= (bcd_to_bin(cdb2) == 7'd0) ? 7'd1
+                         : (bcd_to_bin(cdb2) > track_count) ? track_count
+                         : bcd_to_bin(cdb2);
+              toc_wait  <= 3'd0;
+              state     <= S_ATRK;
+            end
+            default: begin
+              // MSF in BCD, bytes 2 to 4. The 150 sector offset comes back off
+              // here because everything downstream works in LBA.
+              case (apos_step)
+                2'd0: begin
+                  apos_ms   <= {9'd0, bcd_to_bin(cdb2)} * 16'd60
+                             + {9'd0, bcd_to_bin(cdb3)};
+                  apos_step <= 2'd1;
+                end
+                2'd1: begin
+                  apos      <= {16'd0, apos_ms} * 32'd75
+                             + {25'd0, bcd_to_bin(cdb4)} - 32'd150;
+                  apos_step <= 2'd2;
+                end
+                default: ;
+              endcase
+            end
+          endcase
+
+          if (apos_step == 2'd2) begin
+            scan_target <= apos;
+            scan_i      <= 7'd1;
+            toc_track   <= 7'd1;
+            toc_wait    <= 3'd0;
+            state       <= S_FINDTRK;
+          end
+        end
+
+        S_ATRK: begin
+          if (toc_wait != 3'd3) begin
+            toc_wait <= toc_wait + 3'd1;
+          end else begin
+            apos        <= toc_lba;
+            scan_target <= toc_lba;
+            scan_i      <= 7'd1;
+            toc_track   <= 7'd1;
+            toc_wait    <= 3'd0;
+            state       <= S_FINDTRK;
+          end
+        end
+
         // --------------------------------------------- TOC entry read -----
         // cd_toc registers its address and again its data, so the answer is
         // two clocks out. Three are taken, which costs nothing here.
@@ -510,7 +628,7 @@ module cd_host (
           if (toc_wait != 3'd3) begin
             toc_wait <= toc_wait + 3'd1;
           end else begin
-            if (toc_lba <= lba) begin
+            if (toc_lba <= scan_target) begin
               track     <= scan_i;
               trk_lba   <= toc_lba;
               trk_base  <= toc_base;
@@ -535,7 +653,7 @@ module cd_host (
         S_OFFSET: begin
           case (off_step)
             2'd0: begin
-              sec_index <= lba - trk_lba;
+              sec_index <= scan_target - trk_lba;
               off_step  <= 2'd1;
             end
             2'd1: begin
@@ -543,12 +661,37 @@ module cd_host (
               off_step   <= 2'd2;
             end
             default: begin
-              // A 2352 byte sector carries 16 bytes of sync and header before
-              // its 2048 bytes of user data. Skipping it here keeps the
-              // fetcher a plain byte-range reader.
-              fetch_offset <= trk_base + sec_scaled
-                            + ((trk_size == 12'd2352) ? 32'd16 : 32'd0);
-              state        <= S_FETCH;
+              // A 2352 byte **data** sector carries 16 bytes of sync and
+              // header before its 2048 bytes of user data. An audio sector of
+              // the same size is 2352 bytes of samples and nothing else, so
+              // the skip is conditioned on the track type and not on the size.
+              // Getting that wrong shifts every audio track by four samples
+              // and is inaudible, which is the kind of bug that survives.
+              case (off_mode)
+                OFF_ASTART: begin
+                  aud_start   <= trk_base + sec_scaled;
+                  // Nothing has said where to stop yet. SAPEP usually follows
+                  // immediately; until it does, play to the end of the file.
+                  aud_end     <= 32'hFFFF_FFFF;
+                  aud_restart <= 1'b1;
+                  aud_play    <= (cdda_mode != 8'h00);
+                  dstate      <= (cdda_mode == 8'h00) ? DS_PAUSE : DS_PLAY;
+                  state       <= S_STATUS;
+                end
+                OFF_AEND: begin
+                  aud_end  <= trk_base + sec_scaled;
+                  aud_play <= (cdda_mode != 8'h00);
+                  dstate   <= (cdda_mode == 8'h00) ? DS_IDLE : DS_PLAY;
+                  state    <= S_STATUS;
+                end
+                default: begin
+                  fetch_offset <= trk_base + sec_scaled
+                                + ((!trk_audio && trk_size == 12'd2352)
+                                   ? 32'd16 : 32'd0);
+                  state        <= S_FETCH;
+                end
+              endcase
+              rsp_len <= 5'd0;
             end
           endcase
         end
@@ -578,7 +721,9 @@ module cd_host (
         // Two clocks per byte: the core edge-detects the strobe, so it has to
         // return low between bytes.
         S_PUSH: begin
-          if (rsp_len == 5'd0) begin
+          if (aud_busy) begin
+            // stand off; the audio frame owns the byte bus
+          end else if (rsp_len == 5'd0) begin
             state <= S_STATUS;
           end else if (!push_ph) begin
             data    <= rsp[rsp_pos];
@@ -593,7 +738,9 @@ module cd_host (
 
         // -------------------------------------------- push a full sector --
         S_PUSHSEC: begin
-          if (!push_ph) begin
+          if (aud_busy) begin
+            // stand off; the audio frame owns the byte bus
+          end else if (!push_ph) begin
             data     <= sec_data;
             data_wr  <= 1'b1;
             push_ph  <= 1'b1;
@@ -621,9 +768,11 @@ module cd_host (
                 dstate <= DS_IDLE;
                 state  <= S_STATUS;
               end else begin
-                cnt      <= cnt - 9'd1;
-                off_step <= 2'd0;
-                state    <= S_OFFSET;
+                cnt         <= cnt - 9'd1;
+                off_step    <= 2'd0;
+                off_mode    <= OFF_DATA;
+                scan_target <= lba + 32'd1;
+                state       <= S_OFFSET;
               end
             end else begin
               state <= S_STATUS;
@@ -645,6 +794,14 @@ module cd_host (
 
         default: state <= S_IDLE;
       endcase
+
+      // cd.vhd has one CD_DATA for sector bytes and audio bytes both, so they
+      // cannot be presented in the same cycle. Audio wins, because its
+      // deadline is a 44.1 kHz tick and the SCSI FIFO's is however long the
+      // CPU takes to drain 2048 bytes. This assignment sits after the case so
+      // it takes precedence; `aud_busy` holds the push states off for the
+      // eight clocks a stereo frame occupies, which is 0.8% of the period.
+      if (aud_req) data <= aud_data;
     end
   end
 
@@ -659,6 +816,9 @@ module cd_host (
   //   L00000E51 A00838830          the LBA asked for and the byte offset it
   //                                was turned into
   //   B00000000                    the first four bytes handed to the core
+  //   Q 01 40 00 02 12 34 P1 N8    the six bytes of the last audio command,
+  //                                then playing, then chunks buffered
+  //   S0088E830 X0093F000          the audio start and end byte offsets
   //
   // The last two are the ones that matter: rows 2 and 3 together say what was
   // asked for, where it landed, and whether what came back is what is there.
@@ -667,8 +827,9 @@ module cd_host (
 
   // Font indices are ASCII - 32, matching cheat_font.
   localparam [5:0] SP = 6'd0, A_ = 6'd33, B_ = 6'd34, C_ = 6'd35, D_ = 6'd36,
-                   E_ = 6'd37, F_ = 6'd38, H_ = 6'd40, L_ = 6'd44, O_ = 6'd47,
-                   S_ = 6'd51, T_ = 6'd52;
+                   E_ = 6'd37, F_ = 6'd38, H_ = 6'd40, L_ = 6'd44, N_ = 6'd46,
+                   O_ = 6'd47, P_ = 6'd48, Q_ = 6'd49, S_ = 6'd51, T_ = 6'd52,
+                   X_ = 6'd56;
 
   function automatic [5:0] hx(input [3:0] v);
     begin
@@ -736,17 +897,35 @@ module cd_host (
       SP, SP, SP, SP, SP, SP, SP, SP, SP, SP, SP, SP, SP, SP, SP, SP, SP
   };
 
+  // The audio command as it arrived: byte 1, byte 9, then bytes 2 to 5. Byte
+  // 9's top two bits pick the address form and byte 1 says play or seek, and
+  // neither has been confirmed against a real disc, so they go on screen
+  // rather than into a comment.
+  wire [155:0] row4 = {
+      Q_, SP, hx2(aud_cdb[47:40]), SP, hx2(aud_cdb[39:32]), SP,
+              hx2(aud_cdb[31:24]), SP, hx2(aud_cdb[23:16]), SP,
+              hx2(aud_cdb[15:8]),  SP, hx2(aud_cdb[7:0]),   SP,
+      P_, hx({3'd0, aud_play}), SP,
+      N_, hx(aud_level), SP
+  };
+
+  wire [155:0] row5 = {
+      S_, hx8(aud_start), SP,
+      X_, hx8(aud_end),
+      SP, SP, SP, SP, SP, SP, SP
+  };
+
   // The counters run in this clock and the overlay reads them in another, so
   // the assembled block is registered on a slow divider rather than crossed
   // live. Every 4096 clocks is 95 us, which is thousands of overlay clocks of
   // settling either side, and registering the whole block rather than each
   // field means the four rows are always the same instant.
   reg [11:0]  snap_div = 0;
-  reg [623:0] line_r = 0;
+  reg [935:0] line_r = 0;
 
   always @(posedge clk) begin
     snap_div <= snap_div + 12'd1;
-    if (snap_div == 12'd0) line_r <= {row0, row1, row2, row3};
+    if (snap_div == 12'd0) line_r <= {row0, row1, row2, row3, row4, row5};
   end
 
   assign line = line_r;

@@ -456,7 +456,12 @@ module core_top (
   wire         probe_valid, path_valid;
   wire [ 31:0] path_rd_data;
 
-  // The sector fetcher, which is not a diagnostic and is not inside CD_PROBE.
+  // The sector fetcher and the audio ring, neither a diagnostic and neither
+  // inside CD_PROBE.
+  wire         audio_cmd_req;
+  wire [ 15:0] audio_cmd;
+  wire [ 31:0] audio_p0, audio_p1, audio_p2, audio_p3;
+
   wire         fetch_cmd_req;
   wire [ 15:0] fetch_cmd;
   wire [ 31:0] fetch_p0, fetch_p1, fetch_p2, fetch_p3;
@@ -481,16 +486,25 @@ module core_top (
   // instant it is acknowledged, so selecting on the live lines hands one
   // module's completion to another. The fetcher wins ties because it is the
   // only one a running game depends on; the other two are diagnostics.
-  localparam [1:0] OWN_PROBE = 2'd0, OWN_PATH = 2'd1, OWN_FETCH = 2'd2;
+  // Audio outranks the sector fetch. It only asks when a chunk of its ring has
+  // freed, which is once every 11.6 ms, so it takes about a fifth of the
+  // transport and leaves the rest to data. The other way round, a long READ6
+  // burst would hold the port for hundreds of milliseconds and drain a ring
+  // that only holds 93.
+  localparam [1:0] OWN_PROBE = 2'd0, OWN_PATH = 2'd1, OWN_FETCH = 2'd2,
+                   OWN_AUDIO = 2'd3;
 
   reg [1:0] tcmd_own = OWN_PROBE;
   always @(posedge clk_74a) begin
     if (!tcmd_ack)
-      tcmd_own <= fetch_cmd_req ? OWN_FETCH : path_req ? OWN_PATH : OWN_PROBE;
+      tcmd_own <= audio_cmd_req ? OWN_AUDIO
+                : fetch_cmd_req ? OWN_FETCH
+                : path_req      ? OWN_PATH : OWN_PROBE;
   end
 
   wire sel_path  = (tcmd_own == OWN_PATH);
   wire sel_fetch = (tcmd_own == OWN_FETCH);
+  wire sel_audio = (tcmd_own == OWN_AUDIO);
 
   // The request is taken through the same select as the parameters, not ORed
   // past it. sel_path is a register, so it settles a cycle after a requester
@@ -505,12 +519,18 @@ module core_top (
   // Selecting the request too means an unsettled cycle presents the idle
   // module's request, which is low, so nothing is issued until the select
   // agrees with the requester. It costs one cycle and cannot misissue.
-  wire         tcmd_req = sel_fetch ? fetch_cmd_req : sel_path ? path_req : probe_req;
-  wire [ 15:0] tcmd     = sel_fetch ? fetch_cmd     : sel_path ? path_cmd : probe_cmd;
-  wire [ 31:0] tcmd_p0  = sel_fetch ? fetch_p0 : sel_path ? path_p0 : probe_p0;
-  wire [ 31:0] tcmd_p1  = sel_fetch ? fetch_p1 : sel_path ? path_p1 : probe_p1;
-  wire [ 31:0] tcmd_p2  = sel_fetch ? fetch_p2 : sel_path ? path_p2 : probe_p2;
-  wire [ 31:0] tcmd_p3  = sel_fetch ? fetch_p3 : sel_path ? path_p3 : probe_p3;
+  wire         tcmd_req = sel_audio ? audio_cmd_req
+                        : sel_fetch ? fetch_cmd_req : sel_path ? path_req : probe_req;
+  wire [ 15:0] tcmd     = sel_audio ? audio_cmd
+                        : sel_fetch ? fetch_cmd : sel_path ? path_cmd : probe_cmd;
+  wire [ 31:0] tcmd_p0  = sel_audio ? audio_p0
+                        : sel_fetch ? fetch_p0 : sel_path ? path_p0 : probe_p0;
+  wire [ 31:0] tcmd_p1  = sel_audio ? audio_p1
+                        : sel_fetch ? fetch_p1 : sel_path ? path_p1 : probe_p1;
+  wire [ 31:0] tcmd_p2  = sel_audio ? audio_p2
+                        : sel_fetch ? fetch_p2 : sel_path ? path_p2 : probe_p2;
+  wire [ 31:0] tcmd_p3  = sel_audio ? audio_p3
+                        : sel_fetch ? fetch_p3 : sel_path ? path_p3 : probe_p3;
 
   // The bin has to be opened before a single sector can be read, and for two
   // builds nothing did it: `path_start` is written only from bridge 0x414, the
@@ -621,63 +641,53 @@ module core_top (
   wire [155:0] diag_line_sel  = path_show ? path_line  : probe_line;
   wire         diag_valid_sel = path_show ? path_valid : probe_valid;
 
-  // Into the overlay's clock. Not a proper multi-bit crossing and does not
-  // need to be: a diagnostic finishes its counters a cycle before it sets
-  // valid and then holds them until the next run clears it, so the data has
-  // already settled by the time valid works its way through the same three
-  // stages.
-  wire         diag_valid_v;
-  wire [155:0] diag_line_v;
+  // The two probes live in clk_74a and everything else in clk_sys_42_95, so
+  // one 157 bit crossing brings them together and the whole block is then
+  // composed in one clock. A diagnostic finishes its counters a cycle before
+  // it sets valid and holds them until the next run, so the data has settled
+  // long before valid works its way through the same three stages.
+  wire         diag_valid_s;
+  wire [155:0] diag_line_s;
 
   synch_3 #(
       .WIDTH(157)
   ) diag_s (
       {diag_valid_sel, diag_line_sel},
-      {diag_valid_v, diag_line_v},
-      clk_mem_85_91
-  );
-
-  // The parsed cue, crossed separately because it is produced in clk_sys_42_95
-  // rather than clk_74a. Same argument as diag_s: the line is static once the
-  // file has been parsed.
-  wire         toc_valid_v;
-  wire [155:0] toc_line_v;
-
-  synch_3 #(
-      .WIDTH(157)
-  ) toc_s (
-      {toc_line_valid, toc_line},
-      {toc_valid_v, toc_line_v},
-      clk_mem_85_91
-  );
-
-  // The drive model, crossed the same way and for the same reason. cd_host
-  // snapshots its counters onto a slow divider before presenting them, so the
-  // value these three stages see is static for thousands of clocks either
-  // side of a change.
-  wire         host_valid_v;
-  wire [623:0] host_line_v;
-
-  synch_3 #(
-      .WIDTH(625)
-  ) host_s (
-      {cd_enable, cd_host_line},
-      {host_valid_v, host_line_v},
-      clk_mem_85_91
+      {diag_valid_s, diag_line_s},
+      clk_sys_42_95
   );
 
   // Priority: whichever probe was last run, then the drive model once a disc
   // is loaded, then the track table. None of the three needs a menu switch of
-  // its own, which matters at 15 of APF's 16 menu variables. The drive line
+  // its own, which matters at 15 of APF's 16 menu variables. The drive block
   // carries the track count in its first field, so promoting it above the TOC
   // line loses nothing the TOC line was there to show.
-  // The probes and the TOC each compose one row, so they draw at the top with
-  // the rest of the header block blank. Font index 0 is a space, so padding
-  // with zeroes is padding with blanks.
-  wire [623:0] osd_diag_line  = diag_valid_v ? {diag_line_v, 468'd0}
-                              : host_valid_v ? host_line_v
-                              :                {toc_line_v, 468'd0};
-  wire         osd_diag_valid = diag_valid_v | host_valid_v | toc_valid_v;
+  //
+  // The probes and the TOC each compose one row and draw at the top with the
+  // rest of the block blank. Font index 0 is a space, so padding with zeroes
+  // is padding with blanks.
+  wire [935:0] osd_diag_line  = diag_valid_s ? {diag_line_s, 780'd0}
+                              : cd_enable    ? cd_host_line
+                              :                {toc_line, 780'd0};
+  wire         osd_diag_valid = diag_valid_s | cd_enable | toc_line_valid;
+
+  // And into the video clock a character at a time rather than all at once.
+  // Carrying the block as a bus was 2811 registers crossing the die and cost
+  // about a nanosecond of setup slack; the overlay reads characters anyway.
+  wire [7:0] osd_diag_raddr;
+  wire [5:0] osd_diag_rchar;
+  wire       osd_diag_valid_v;
+
+  cd_diag cd_diag (
+      .clk_sys(clk_sys_42_95),
+      .block  (osd_diag_line),
+      .valid  (osd_diag_valid),
+
+      .clk_osd  (clk_mem_85_91),
+      .raddr    (osd_diag_raddr),
+      .rchar    (osd_diag_rchar),
+      .valid_osd(osd_diag_valid_v)
+  );
 
   // bridge data slot access
 
@@ -927,6 +937,12 @@ module core_top (
   wire [ 3:0] cd_fetch_err;
   wire [ 3:0] cd_fetch_err_sys;
 
+  wire        cd_aud_play, cd_aud_restart, cd_aud_ended;
+  wire [31:0] cd_aud_start, cd_aud_end;
+  wire [ 3:0] cd_aud_level;
+  wire [ 7:0] cd_aud_data;
+  wire        cd_aud_req, cd_aud_busy, cd_aud_dm;
+
   // A cue with tracks in it is a disc. cd_en is a per-load mode bit rather
   // than a setting: K[7] of the joypad port is `not CD_EN`, the CD-unit
   // presence flag, so leaving it set for a HuCard makes a game that checks it
@@ -947,7 +963,7 @@ module core_top (
       clk_sys_42_95
   );
 
-  wire [623:0] cd_host_line;
+  wire [935:0] cd_host_line;
 
   cd_host cd_host (
       .clk  (clk_sys_42_95),
@@ -985,7 +1001,53 @@ module core_top (
       .sec_data    (cd_sec_data),
 
       .fetch_err(cd_fetch_err_sys),
-      .line     (cd_host_line)
+
+      .aud_play   (cd_aud_play),
+      .aud_restart(cd_aud_restart),
+      .aud_start  (cd_aud_start),
+      .aud_end    (cd_aud_end),
+      .aud_ended  (cd_aud_ended),
+      .aud_level  (cd_aud_level),
+      .aud_data   (cd_aud_data),
+      .aud_req    (cd_aud_req),
+      .aud_busy   (cd_aud_busy),
+      .aud_dm     (cd_aud_dm),
+
+      .line(cd_host_line)
+  );
+
+  cd_audio cd_audio (
+      .clk_74a(clk_74a),
+      .clk_sys(clk_sys_42_95),
+      .reset  (cue_reset),
+
+      .play     (cd_aud_play),
+      .restart  (cd_aud_restart),
+      .start_off(cd_aud_start),
+      .end_off  (cd_aud_end),
+      .ended    (cd_aud_ended),
+
+      .aud_data(cd_aud_data),
+      .aud_req (cd_aud_req),
+      .aud_busy(cd_aud_busy),
+      .aud_dm  (cd_aud_dm),
+
+      .bridge_addr   (bridge_addr),
+      .bridge_wr     (bridge_wr),
+      .bridge_wr_data(bridge_wr_data),
+
+      .cmd_req   (audio_cmd_req),
+      .cmd       (audio_cmd),
+      .cmd_p0    (audio_p0),
+      .cmd_p1    (audio_p1),
+      .cmd_p2    (audio_p2),
+      .cmd_p3    (audio_p3),
+      .cmd_ack   (tcmd_ack & sel_audio),
+      .cmd_done  (tcmd_done & sel_audio),
+      .cmd_result(tcmd_result),
+
+      .level(cd_aud_level),
+      .err  ()
   );
 
   synch_3 #(
@@ -1527,8 +1589,9 @@ module core_top (
       .title_count(cheat_title_count),
       .code_count (cheat_code_total),
 
-      .diag_valid(osd_diag_valid),
-      .diag_line (osd_diag_line),
+      .diag_valid(osd_diag_valid_v),
+      .diag_raddr(osd_diag_raddr),
+      .diag_rchar(osd_diag_rchar),
 
       .title_group(osd_title_group),
       .title_col  (osd_title_col),

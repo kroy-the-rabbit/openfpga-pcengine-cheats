@@ -83,11 +83,13 @@ module cheat_osd #(
     // every trace of a diagnostic lives in the module P6 deletes and adding a
     // second one costs nothing here.
     input  wire         diag_valid,
-    // Four rows of 26 characters, row 0 in the most significant 156 bits. One
-    // row could not carry the CD diagnostics and cycling pages meant four
-    // screenshots to read one state, so the header block grows instead. See
-    // DIAG_ROWS below; with DIAG=0 none of this exists.
-    input  wire [623:0] diag_line,
+    // The diagnostic block is read a character at a time out of cd_diag's RAM
+    // rather than carried in as a bus: 936 bits crossed into this clock cost
+    // about a nanosecond of setup slack, and the overlay wanted characters
+    // anyway. See DIAG_ROWS below; with DIAG=0 none of this exists.
+    output wire [  7:0] diag_raddr,     // {row, col}, combinational
+    input  wire [  5:0] diag_rchar,     // valid the cycle after
+
 
     output reg  [4:0]  title_group,  // to cheat_titles
     output reg  [4:0]  title_col,
@@ -106,7 +108,7 @@ module cheat_osd #(
   // drawn, which costs the cheat list the difference. A debug build showing
   // fourteen titles instead of seventeen is a trade worth making; P6 sets
   // DIAG to 0 and this returns to one row.
-  localparam DIAG_ROWS = 4;
+  localparam DIAG_ROWS = 6;
   localparam HDR_ROWS  = (DIAG != 0) ? DIAG_ROWS : 1;
   localparam MAX_LINES = ROWS - ROW0 - HDR_ROWS;
 
@@ -178,21 +180,11 @@ module cheat_osd #(
     end
   endfunction
 
-  function automatic [5:0] header_char(input [1:0] hrow, input [4:0] col);
-    reg [9:0] base;
+  // The diagnostic case is not here any more: it comes out of the RAM, on the
+  // same one-cycle latency this function's result already had.
+  function automatic [5:0] header_char(input [2:0] hrow, input [4:0] col);
     begin
-      if (DIAG != 0 && diag_valid) begin
-        // Widened before the multiply: 25*6 is 150, which does not fit the
-        // 5 bits `col` is carried in, and a truncated index silently reads the
-        // wrong character. The guard matters too, because `fill` runs past the
-        // last column to drain the pipeline, so `col` reaches 28.
-        //
-        // Row 0 is the most significant 156 bits, so it draws at the top.
-        base = ({8'd0, (2'd3 - hrow)} * 10'd156)
-             + ({5'd0, (5'd25 - col)} * 10'd6);
-        if (col > 5'd25) header_char = SP;
-        else header_char = diag_line[base+:6];
-      end else if (hrow != 2'd0) begin
+      if (hrow != 3'd0) begin
         // The cheat header is one row; the rest of the block stays blank.
         header_char = SP;
       end else if (title_count == 6'd0) begin
@@ -251,7 +243,15 @@ module cheat_osd #(
   // the subtraction inline, because a part-select on an expression is not
   // something every tool in this flow accepts.
   wire [4:0] hdr_row_full = text_row - ROW0[4:0];
-  wire [1:0] hdr_row      = hdr_row_full[1:0];
+  wire [2:0] hdr_row      = hdr_row_full[2:0];
+
+  // cd_diag registers its read, so presenting the address here lands the
+  // character in the same cycle hdr_char_d1 occupies. The RAM holds spaces
+  // everywhere outside the text, so the fill counter running past the last
+  // column needs no guard of its own.
+  assign diag_raddr = {hdr_row, src_col};
+
+  wire [5:0] hdr_stage1 = (DIAG != 0 && diag_valid) ? diag_rchar : hdr_char_d1;
   wire [4:0] row_index = text_row - ROW0[4:0] - HDR_ROWS[4:0];
   wire       row_used  = in_header
                       || (!above && text_row >= (ROW0[4:0] + HDR_ROWS[4:0])
@@ -285,12 +285,13 @@ module cheat_osd #(
     fill_src_d1 <= src_col;
     hdr_char_d1 <= header_char(hdr_row, src_col);
 
+
     // Data stage: the RAM is answering.
     fill_col_d2 <= fill_col_d1;
     fill_hdr_d2 <= fill_hdr_d1;
     fill_pre_d2 <= fill_pre_d1;
     fill_src_d2 <= fill_src_d1;
-    hdr_char_d2 <= hdr_char_d1;
+    hdr_char_d2 <= hdr_stage1;
     fill_col_d3 <= fill_col_d2;
     fill_hdr_d3 <= fill_hdr_d2;
     fill_pre_d3 <= fill_pre_d2;

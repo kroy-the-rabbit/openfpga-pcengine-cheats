@@ -54,3 +54,6 @@ cr_ie_info.json
 
 # Local build harness output
 /build/
+
+# Local worktrees, kept inside the repo rather than beside it
+/worktrees/
