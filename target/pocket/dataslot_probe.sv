@@ -30,8 +30,10 @@
 `default_nettype none
 
 module dataslot_probe #(
-    // The slot to read. Matches the deferload disc slot in data.json.
-    parameter [15:0] SLOT_ID = 16'd100,
+    // The slot to read: 101, the bin, which is the only deferload slot and the
+    // only one big enough for an 8MB span. It is empty until DEBUG Path Probe
+    // has opened a file into it, so run that first or every read returns 2.
+    parameter [15:0] SLOT_ID = 16'd101,
 
     // Bytes per request is chosen at runtime, not here: it is the variable
     // worth sweeping, and a parameter would cost a 19 minute build per value.

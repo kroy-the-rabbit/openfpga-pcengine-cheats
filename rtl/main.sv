@@ -134,7 +134,27 @@ module pce (
 
     // Audio
     output wire [15:0] audio_l,
-    output wire [15:0] audio_r
+    output wire [15:0] audio_r,
+
+    // PC Engine CD. The drive model lives in core_top, on the bridge side,
+    // because that is where the transport that feeds it is. docs/CD-PLAN.md P3.
+    input  wire        cd_enable,
+    input  wire [ 7:0] cd_stat_in,
+    input  wire [ 7:0] cd_msg_in,
+    input  wire        cd_stat_get,
+    input  wire        cd_dout_req,
+    input  wire [ 7:0] cd_data_in,
+    input  wire        cd_data_wr_in,
+    input  wire        cd_audio_wr_in,
+    input  wire        cd_dm_in,
+    input  wire        cd_region_in,
+
+    output wire [95:0] cd_comm_out,
+    output wire        cd_comm_send_out,
+    output wire [79:0] cd_dout_out,
+    output wire        cd_dout_send_out,
+    output wire        cd_data_end_out,
+    output wire        cd_reset_out
 );
 
   wire                                       [63:0] status = 0;
@@ -222,34 +242,40 @@ module pce (
       .JOY_IN (joy_in),
 
       .CD_EN(cd_en),
-      // Arcade card
+      // Arcade card. Left off deliberately: it prunes cleanly and completely
+      // because pce_top ANDs it with CD_EN, and it would cost 2MB of SDRAM and
+      // a 32-bit barrel shifter for four games. See docs/CD-PLAN.md 5e.
       .AC_EN(0),
 
-      // .CD_RAM_A (cd_ram_a),
-      // .CD_RAM_DO(cd_ram_do),
-      // .CD_RAM_DI(rom_sdata),
-      // .CD_RAM_RD(cd_ram_rd),
-      // .CD_RAM_WR(cd_ram_wr),
+      // Super System Card RAM and, if AC_EN were ever 1, Arcade Card RAM. The
+      // SDRAM mux that consumes these has been live all along: until now these
+      // four wires had no driver at all and Quartus tied them low, so the
+      // shipping core's correctness rested on a synthesis default.
+      .CD_RAM_A (cd_ram_a),
+      .CD_RAM_DO(cd_ram_do),
+      .CD_RAM_DI(rom_sdata),
+      .CD_RAM_RD(cd_ram_rd),
+      .CD_RAM_WR(cd_ram_wr),
 
-      // .CD_STAT(cd_stat[7:0]),
-      // .CD_MSG(cd_stat[15:8]),
-      // .CD_STAT_GET(cd_stat_rec),
+      .CD_STAT(cd_stat_in),
+      .CD_MSG(cd_msg_in),
+      .CD_STAT_GET(cd_stat_get),
 
-      // .CD_COMM(cd_comm),
-      // .CD_COMM_SEND(cd_comm_send),
+      .CD_COMM(cd_comm_out),
+      .CD_COMM_SEND(cd_comm_send_out),
 
-      // .CD_DOUT_REQ(cd_dataout_req),
-      // .CD_DOUT(cd_dataout),
-      // .CD_DOUT_SEND(cd_dataout_send),
+      .CD_DOUT_REQ(cd_dout_req),
+      .CD_DOUT(cd_dout_out),
+      .CD_DOUT_SEND(cd_dout_send_out),
 
-      // .CD_REGION(cd_region),
-      // .CD_RESET (cd_reset_req),
+      .CD_REGION(cd_region_in),
+      .CD_RESET (cd_reset_out),
 
-      // .CD_DATA(!cd_dat_byte ? cd_dat[7:0] : cd_dat[15:8]),
-      // .CD_DATA_WR(cd_data_wr),
-      // .CD_AUDIO_WR(cd_audio_wr),
-      // .CD_DATA_END(cd_dat_req),
-      // .CD_DM(cd_dm),
+      .CD_DATA(cd_data_in),
+      .CD_DATA_WR(cd_data_wr_in),
+      .CD_AUDIO_WR(cd_audio_wr_in),
+      .CD_DATA_END(cd_data_end_out),
+      .CD_DM(cd_dm_in),
 
       .CDDA_SL(cdda_sl),
       .CDDA_SR(cdda_sr),
@@ -318,7 +344,7 @@ module pce (
   // 	.cd_out(cd_out)
   // );
 
-  reg        cd_en = 0;
+  wire       cd_en = cd_enable;
   // always @(posedge clk_sys) begin
   // 	if(img_mounted && img_size) cd_en <= 1;
   // 	if(cart_download) cd_en <= 0;

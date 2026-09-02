@@ -456,6 +456,11 @@ module core_top (
   wire         probe_valid, path_valid;
   wire [ 31:0] path_rd_data;
 
+  // The sector fetcher, which is not a diagnostic and is not inside CD_PROBE.
+  wire         fetch_cmd_req;
+  wire [ 15:0] fetch_cmd;
+  wire [ 31:0] fetch_p0, fetch_p1, fetch_p2, fetch_p3;
+
   wire         tcmd_ack, tcmd_done;
   wire [ 15:0] tcmd_result;
 
@@ -470,10 +475,22 @@ module core_top (
   // for the duration. The loser keeps its request asserted and wins the next
   // one. Priority while idle goes to the path probe, arbitrarily; they are
   // separate menu switches and are not expected to run together.
-  reg sel_path = 0;
+  // Three requesters now: the throughput probe, the path prober and the sector
+  // fetcher. Ownership is latched while the port is idle and frozen for the
+  // transaction, for the reason P1 recorded: a requester drops its request the
+  // instant it is acknowledged, so selecting on the live lines hands one
+  // module's completion to another. The fetcher wins ties because it is the
+  // only one a running game depends on; the other two are diagnostics.
+  localparam [1:0] OWN_PROBE = 2'd0, OWN_PATH = 2'd1, OWN_FETCH = 2'd2;
+
+  reg [1:0] tcmd_own = OWN_PROBE;
   always @(posedge clk_74a) begin
-    if (!tcmd_ack) sel_path <= path_req;
+    if (!tcmd_ack)
+      tcmd_own <= fetch_cmd_req ? OWN_FETCH : path_req ? OWN_PATH : OWN_PROBE;
   end
+
+  wire sel_path  = (tcmd_own == OWN_PATH);
+  wire sel_fetch = (tcmd_own == OWN_FETCH);
 
   // The request is taken through the same select as the parameters, not ORed
   // past it. sel_path is a register, so it settles a cycle after a requester
@@ -488,12 +505,77 @@ module core_top (
   // Selecting the request too means an unsettled cycle presents the idle
   // module's request, which is low, so nothing is issued until the select
   // agrees with the requester. It costs one cycle and cannot misissue.
-  wire         tcmd_req = sel_path ? path_req : probe_req;
-  wire [ 15:0] tcmd     = sel_path ? path_cmd : probe_cmd;
-  wire [ 31:0] tcmd_p0  = sel_path ? path_p0 : probe_p0;
-  wire [ 31:0] tcmd_p1  = sel_path ? path_p1 : probe_p1;
-  wire [ 31:0] tcmd_p2  = sel_path ? path_p2 : probe_p2;
-  wire [ 31:0] tcmd_p3  = sel_path ? path_p3 : probe_p3;
+  wire         tcmd_req = sel_fetch ? fetch_cmd_req : sel_path ? path_req : probe_req;
+  wire [ 15:0] tcmd     = sel_fetch ? fetch_cmd     : sel_path ? path_cmd : probe_cmd;
+  wire [ 31:0] tcmd_p0  = sel_fetch ? fetch_p0 : sel_path ? path_p0 : probe_p0;
+  wire [ 31:0] tcmd_p1  = sel_fetch ? fetch_p1 : sel_path ? path_p1 : probe_p1;
+  wire [ 31:0] tcmd_p2  = sel_fetch ? fetch_p2 : sel_path ? path_p2 : probe_p2;
+  wire [ 31:0] tcmd_p3  = sel_fetch ? fetch_p3 : sel_path ? path_p3 : probe_p3;
+
+  // The bin has to be opened before a single sector can be read, and for two
+  // builds nothing did it: `path_start` is written only from bridge 0x414, the
+  // debug menu toggle, so unless somebody ran the probe by hand slot 101 was
+  // never opened. Every 0x0180 against it returned an error into a buffer
+  // nobody had written, the drive pushed 2048 zero bytes, and the System Card
+  // said LOAD ERROR. The fetch counter still climbed, because the command did
+  // complete: it completed unsuccessfully.
+  //
+  // So this is no longer a diagnostic and no longer sits inside CD_PROBE. It
+  // runs from the cue being parsed, which is the event that means slot 100
+  // holds a path worth reading, and the menu toggle is kept only so the chain
+  // can still be re-run by hand.
+  wire cue_loaded;              // assigned beside cd_toc, below
+  wire toc_ready_74;
+  synch_3 s_tocrdy (
+      cue_loaded,
+      toc_ready_74,
+      clk_74a
+  );
+
+  reg  toc_ready_74_d = 0;
+  reg  path_auto = 0;
+  always @(posedge clk_74a) begin
+    toc_ready_74_d <= toc_ready_74;
+    path_auto      <= toc_ready_74 & ~toc_ready_74_d;
+  end
+
+  // The open runs on its own at every cue load now, so `path_valid` is high in
+  // normal operation and can no longer be read as "the path prober has an
+  // answer worth showing". Only a run started from the menu claims the
+  // overlay; an automatic one leaves the drive rows on screen.
+  reg path_manual = 0;
+  always @(posedge clk_74a) begin
+    if (path_start) path_manual <= 1'b1;
+    else if (path_auto) path_manual <= 1'b0;
+  end
+
+  wire path_show = path_manual & (path_valid | path_start);
+
+  dataslot_path path (
+      .clk  (clk_74a),
+      .reset(~pll_core_locked),
+
+      .start(path_start | path_auto),
+
+      .bridge_addr   (bridge_addr),
+      .bridge_wr     (bridge_wr),
+      .bridge_wr_data(bridge_wr_data),
+      .bridge_rd     (bridge_rd),
+      .bridge_rd_data(path_rd_data),
+
+      .cmd_req   (path_req),
+      .cmd       (path_cmd),
+      .cmd_p0    (path_p0),
+      .cmd_p1    (path_p1),
+      .cmd_p2    (path_p2),
+      .cmd_p3    (path_p3),
+      .cmd_ack   (tcmd_ack & sel_path),
+      .cmd_done  (tcmd_done & sel_path),
+      .cmd_result(tcmd_result),
+
+      .line (path_line),
+      .valid(path_valid)
+  );
 
   generate
     if (CD_PROBE) begin : g_probe
@@ -513,39 +595,14 @@ module core_top (
           .cmd_p1    (probe_p1),
           .cmd_p2    (probe_p2),
           .cmd_p3    (probe_p3),
-          .cmd_ack   (tcmd_ack & ~sel_path),
-          .cmd_done  (tcmd_done & ~sel_path),
+          .cmd_ack   (tcmd_ack & (tcmd_own == OWN_PROBE)),
+          .cmd_done  (tcmd_done & (tcmd_own == OWN_PROBE)),
           .cmd_result(tcmd_result),
 
           .line (probe_line),
           .valid(probe_valid)
       );
 
-      dataslot_path path (
-          .clk  (clk_74a),
-          .reset(~pll_core_locked),
-
-          .start(path_start),
-
-          .bridge_addr   (bridge_addr),
-          .bridge_wr     (bridge_wr),
-          .bridge_wr_data(bridge_wr_data),
-          .bridge_rd     (bridge_rd),
-          .bridge_rd_data(path_rd_data),
-
-          .cmd_req   (path_req),
-          .cmd       (path_cmd),
-          .cmd_p0    (path_p0),
-          .cmd_p1    (path_p1),
-          .cmd_p2    (path_p2),
-          .cmd_p3    (path_p3),
-          .cmd_ack   (tcmd_ack & sel_path),
-          .cmd_done  (tcmd_done & sel_path),
-          .cmd_result(tcmd_result),
-
-          .line (path_line),
-          .valid(path_valid)
-      );
     end else begin : g_no_probe
       assign probe_req    = 0;
       assign probe_cmd    = 0;
@@ -555,23 +612,14 @@ module core_top (
       assign probe_p3     = 0;
       assign probe_line   = 0;
       assign probe_valid  = 0;
-      assign path_req     = 0;
-      assign path_cmd     = 0;
-      assign path_p0      = 0;
-      assign path_p1      = 0;
-      assign path_p2      = 0;
-      assign path_p3      = 0;
-      assign path_line    = 0;
-      assign path_valid   = 0;
-      assign path_rd_data = 0;
     end
   endgenerate
 
   // Whichever diagnostic last produced an answer. The path probe wins while it
   // is running so that starting it clears the throughput line rather than
   // leaving a stale number on screen next to fresh result codes.
-  wire [155:0] diag_line_sel = (path_valid | path_start) ? path_line : probe_line;
-  wire         diag_valid_sel = (path_valid | path_start) ? path_valid : probe_valid;
+  wire [155:0] diag_line_sel  = path_show ? path_line  : probe_line;
+  wire         diag_valid_sel = path_show ? path_valid : probe_valid;
 
   // Into the overlay's clock. Not a proper multi-bit crossing and does not
   // need to be: a diagnostic finishes its counters a cycle before it sets
@@ -588,6 +636,48 @@ module core_top (
       {diag_valid_v, diag_line_v},
       clk_mem_85_91
   );
+
+  // The parsed cue, crossed separately because it is produced in clk_sys_42_95
+  // rather than clk_74a. Same argument as diag_s: the line is static once the
+  // file has been parsed.
+  wire         toc_valid_v;
+  wire [155:0] toc_line_v;
+
+  synch_3 #(
+      .WIDTH(157)
+  ) toc_s (
+      {toc_line_valid, toc_line},
+      {toc_valid_v, toc_line_v},
+      clk_mem_85_91
+  );
+
+  // The drive model, crossed the same way and for the same reason. cd_host
+  // snapshots its counters onto a slow divider before presenting them, so the
+  // value these three stages see is static for thousands of clocks either
+  // side of a change.
+  wire         host_valid_v;
+  wire [623:0] host_line_v;
+
+  synch_3 #(
+      .WIDTH(625)
+  ) host_s (
+      {cd_enable, cd_host_line},
+      {host_valid_v, host_line_v},
+      clk_mem_85_91
+  );
+
+  // Priority: whichever probe was last run, then the drive model once a disc
+  // is loaded, then the track table. None of the three needs a menu switch of
+  // its own, which matters at 15 of APF's 16 menu variables. The drive line
+  // carries the track count in its first field, so promoting it above the TOC
+  // line loses nothing the TOC line was there to show.
+  // The probes and the TOC each compose one row, so they draw at the top with
+  // the rest of the header block blank. Font index 0 is a space, so padding
+  // with zeroes is padding with blanks.
+  wire [623:0] osd_diag_line  = diag_valid_v ? {diag_line_v, 468'd0}
+                              : host_valid_v ? host_line_v
+                              :                {toc_line_v, 468'd0};
+  wire         osd_diag_valid = diag_valid_v | host_valid_v | toc_valid_v;
 
   // bridge data slot access
 
@@ -811,6 +901,130 @@ module core_top (
       .write_data(cheat_dout)
   );
 
+  // ------------------------------------------------------------------
+  // The drive. docs/CD-PLAN.md P3.
+  //
+  // cd_host runs on clk_sys_42_95 because that is cd.vhd's clock, and cd_fetch
+  // straddles the two domains: the transport it uses lives on clk_74a with the
+  // bridge. A whole sector is buffered before the drive model is told it has
+  // one, because a short read is indistinguishable from a successful one.
+  wire [ 6:0] toc_rd_track;
+  wire [31:0] toc_rd_lba, toc_rd_base;
+  wire [11:0] toc_rd_size;
+  wire        toc_rd_audio;
+
+  wire [95:0] cd_comm;
+  wire        cd_comm_send;
+  wire [ 7:0] cd_stat, cd_msg, cd_data;
+  wire        cd_stat_get, cd_dout_req, cd_data_wr, cd_audio_wr;
+  wire [79:0] cd_dout;
+  wire        cd_dout_send, cd_data_end, cd_dm, cd_region, cd_reset_lvl;
+
+  wire        cd_fetch_req, cd_fetch_done;
+  wire [31:0] cd_fetch_offset;
+  wire [10:0] cd_sec_addr;
+  wire [ 7:0] cd_sec_data;
+  wire [ 3:0] cd_fetch_err;
+  wire [ 3:0] cd_fetch_err_sys;
+
+  // A cue with tracks in it is a disc. cd_en is a per-load mode bit rather
+  // than a setting: K[7] of the joypad port is `not CD_EN`, the CD-unit
+  // presence flag, so leaving it set for a HuCard makes a game that checks it
+  // take the CD path and find nothing. See docs/CD-PLAN.md 5e.
+  assign cue_loaded = (toc_track_count != 7'd0);
+  wire   cd_enable  = cue_loaded;
+
+  // The open has to have happened before the first sector is asked for. In
+  // practice it always has, by three orders of magnitude: the chain runs the
+  // moment the cue parses and the System Card is hundreds of milliseconds from
+  // its first READ6. The gate is here so the dependency is in the RTL rather
+  // than in the timing, and so a failed open stalls in S_FETCH where the
+  // overlay shows it, instead of serving zeroes that look like data.
+  wire bin_ready;
+  synch_3 s_binrdy (
+      path_valid,
+      bin_ready,
+      clk_sys_42_95
+  );
+
+  wire [623:0] cd_host_line;
+
+  cd_host cd_host (
+      .clk  (clk_sys_42_95),
+      .reset(cue_reset),
+      .cd_en(cd_enable),
+
+      .comm     (cd_comm),
+      .comm_send(cd_comm_send),
+      .stat     (cd_stat),
+      .msg      (cd_msg),
+      .stat_get (cd_stat_get),
+      .dout_req (cd_dout_req),
+      .dout     (cd_dout),
+      .dout_send(cd_dout_send),
+      .data     (cd_data),
+      .data_wr  (cd_data_wr),
+      .audio_wr (cd_audio_wr),
+      .data_end (cd_data_end),
+      .dm       (cd_dm),
+      .cd_reset (cd_reset_lvl),
+      .region   (cd_region),
+
+      .toc_track  (toc_rd_track),
+      .toc_lba    (toc_rd_lba),
+      .toc_base   (toc_rd_base),
+      .toc_size   (toc_rd_size),
+      .toc_audio  (toc_rd_audio),
+      .track_count(toc_track_count),
+      .toc_end    (toc_end),
+
+      .fetch_req   (cd_fetch_req),
+      .fetch_offset(cd_fetch_offset),
+      .fetch_done  (cd_fetch_done),
+      .sec_addr    (cd_sec_addr),
+      .sec_data    (cd_sec_data),
+
+      .fetch_err(cd_fetch_err_sys),
+      .line     (cd_host_line)
+  );
+
+  synch_3 #(
+      .WIDTH(4)
+  ) s_ferr (
+      cd_fetch_err,
+      cd_fetch_err_sys,
+      clk_sys_42_95
+  );
+
+  cd_fetch cd_fetch (
+      .clk_74a(clk_74a),
+      .clk_sys(clk_sys_42_95),
+      .reset  (~pll_core_locked),
+
+      .ready   (bin_ready),
+      .req     (cd_fetch_req),
+      .offset  (cd_fetch_offset),
+      .done    (cd_fetch_done),
+      .sec_addr(cd_sec_addr),
+      .sec_data(cd_sec_data),
+
+      .bridge_addr   (bridge_addr),
+      .bridge_wr     (bridge_wr),
+      .bridge_wr_data(bridge_wr_data),
+
+      .cmd_req   (fetch_cmd_req),
+      .cmd       (fetch_cmd),
+      .cmd_p0    (fetch_p0),
+      .cmd_p1    (fetch_p1),
+      .cmd_p2    (fetch_p2),
+      .cmd_p3    (fetch_p3),
+      .cmd_ack   (tcmd_ack & sel_fetch),
+      .cmd_done  (tcmd_done & sel_fetch),
+      .cmd_result(tcmd_result),
+
+      .err(cd_fetch_err)
+  );
+
   // A cheat file belongs to the game it was loaded for, so the parser restarts
   // whenever a new cheat file or a new ROM starts arriving, and at core reset.
   // The reset term is not optional: without it the parser could reach the poker
@@ -874,6 +1088,81 @@ module core_top (
       .group_count(cheat_group_count),
       .byte_count (cheat_byte_count)
   );
+
+  // ------------------------------------------------------------------
+  // The cue sheet, parsed into a track table. docs/CD-PLAN.md P2.
+  //
+  // Slot 100 is preloaded rather than deferload: deferload is right for the
+  // 489MB bin, which cannot fit anywhere, and wrong for a 975 byte cue, whose
+  // bytes have to reach the core to be parsed at all. Only slot 101 defers.
+  //
+  // WRITE_MEM_CLOCK_DELAY 4 and WRITE_MEM_EN_CYCLE_LENGTH 1 as the cheat
+  // loader uses, not the ROM loader's 32 and 16: APF delivers a 32-bit word
+  // about every 75 clk_74a cycles and a byte-wide drain has to stay ahead.
+  wire       cue_wr;
+  wire [7:0] cue_dout;
+
+  data_loader #(
+      .ADDRESS_MASK_UPPER_4(4'h3),
+      .ADDRESS_SIZE(24),
+      .OUTPUT_WORD_SIZE(1),
+      .WRITE_MEM_CLOCK_DELAY(4),
+      .WRITE_MEM_EN_CYCLE_LENGTH(1)
+  ) cue_data_loader (
+      .clk_74a(clk_74a),
+      .clk_memory(clk_sys_42_95),
+
+      .bridge_wr(bridge_wr),
+      .bridge_endian_little(bridge_endian_little),
+      .bridge_addr(bridge_addr),
+      .bridge_wr_data(bridge_wr_data),
+
+      .write_en  (cue_wr),
+      .write_addr(),
+      .write_data(cue_dout)
+  );
+
+  wire cue_download = any_download && dataslot_requestwrite_id == 16'd100;
+
+  reg cue_dl_s, cue_dl_s2, cue_dl_s3;
+  always @(posedge clk_sys_42_95) begin
+    cue_dl_s  <= cue_download;
+    cue_dl_s2 <= cue_dl_s;
+    cue_dl_s3 <= cue_dl_s2;
+  end
+
+  // Same shape as cheat_reset: a new cue, or a new ROM, or core reset. Edge
+  // taken off the later synchroniser stages because cue_download is a
+  // combinational compare in the clk_74a domain.
+  wire cue_reset = ~reset_n | (cue_dl_s2 & ~cue_dl_s3) | (cart_dl_s2 & ~cart_dl_s3);
+
+  wire [  6:0] toc_track_count;
+  wire [ 31:0] toc_end;
+  wire [155:0] toc_line;
+  wire         toc_line_valid;
+
+  cd_toc #(
+      .MAX_TRACKS(99)
+  ) cd_toc (
+      .clk  (clk_sys_42_95),
+      .reset(cue_reset),
+      .wr   (cue_wr),
+      .data (cue_dout),
+
+      // Read by the drive model. Until P3 this was parked on the last track
+      // parsed, purely to stop Quartus deleting the memories as unused.
+      .rd_track(toc_rd_track),
+      .rd_lba  (toc_rd_lba),
+      .rd_base (toc_rd_base),
+      .rd_size (toc_rd_size),
+      .rd_audio(toc_rd_audio),
+
+      .track_count(toc_track_count),
+      .toc_end    (toc_end),
+      .line       (toc_line),
+      .line_valid (toc_line_valid)
+  );
+
 
   data_unloader #(
       .ADDRESS_MASK_UPPER_4(4'h2),
@@ -1142,7 +1431,27 @@ module core_top (
       .border(border),
 
       .audio_l(audio_l),
-      .audio_r(audio_r)
+      .audio_r(audio_r),
+
+      // PC Engine CD. The drive model is above, on this side, because the
+      // transport that feeds it lives here with the bridge.
+      .cd_enable      (cd_enable),
+      .cd_stat_in     (cd_stat),
+      .cd_msg_in      (cd_msg),
+      .cd_stat_get    (cd_stat_get),
+      .cd_dout_req    (cd_dout_req),
+      .cd_data_in     (cd_data),
+      .cd_data_wr_in  (cd_data_wr),
+      .cd_audio_wr_in (cd_audio_wr),
+      .cd_dm_in       (cd_dm),
+      .cd_region_in   (cd_region),
+
+      .cd_comm_out     (cd_comm),
+      .cd_comm_send_out(cd_comm_send),
+      .cd_dout_out     (cd_dout),
+      .cd_dout_send_out(cd_dout_send),
+      .cd_data_end_out (cd_data_end),
+      .cd_reset_out    (cd_reset_lvl)
   );
 
   ////////////////////////////////////////////////////////////////////////////////////////
@@ -1218,8 +1527,8 @@ module core_top (
       .title_count(cheat_title_count),
       .code_count (cheat_code_total),
 
-      .diag_valid(diag_valid_v),
-      .diag_line (diag_line_v),
+      .diag_valid(osd_diag_valid),
+      .diag_line (osd_diag_line),
 
       .title_group(osd_title_group),
       .title_col  (osd_title_col),

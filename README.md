@@ -48,36 +48,38 @@ replace it.
 
 ## PC Engine CD is being built
 
-Not finished, and no longer research. `docs/CD-PLAN.md` is the plan and two of
-its phases are done and verified on real hardware.
+`docs/CD-PLAN.md` is the plan. **Castlevania: Rondo of Blood boots and plays**,
+verified on hardware. There is no audio yet.
 
-The CD RTL is inherited and compiles in every build, `rtl/pce/cd/`: `cd.vhd`,
-`SCSI.vhd`, `SCSI_FIFO.vhd`, `CDDA_FIFO.vhd` and `MSM5205.vhd`. It costs zero
-logic because it is held disabled rather than deleted, in three places:
-`pce_top.vhd` passes `EN => '0'`, `main.sv` has `cd_en` tied low with its
-assignments commented out, and the CD lines around it are commented too. MiSTer
-passes `EN => '1'` at that same point; agg23 changed it when porting.
+The CD RTL is inherited, `rtl/pce/cd/`: `cd.vhd`, `SCSI.vhd`, `SCSI_FIFO.vhd`,
+`CDDA_FIFO.vhd` and `MSM5205.vhd`. It is live now: `pce_top.vhd` passes
+`EN => CD_EN` and `main.sv` drives `cd_en` from whether a cue has parsed, so a
+HuCard still runs with the CD unit absent.
 
-What makes it a project rather than a switch is that MiSTer's CD block expects
-a host processor running Linux to parse the cue sheet, seek the image and feed
-it sectors, and the Pocket has none. The drive itself lives on that host, about
-900 lines of it, and all of it has to move into the FPGA.
+What made it a project rather than a switch is that MiSTer's CD block expects a
+host processor running Linux to parse the cue sheet, seek the image and feed it
+sectors, and the Pocket has none. The drive itself lives on that host, about
+900 lines of it, and all of it had to move into the FPGA.
 
-Two pieces of that are now working:
+Working, each verified on hardware:
 
 * **The transport.** APF target command `0x0180` reads a range of a data slot
-  into the core. Measured on hardware at **1104 KB/s** with 8KB requests, which
-  is 6.3 times what Redbook audio needs on its own.
-* **The file layer.** `0x0190` tells the core where the file the user picked
-  actually lives, and `0x0192` opens a different file next to it. So the core
-  can be handed a cue and open the bin the cue names, which is what a disc
-  image needs and what the Pocket's file browser cannot do by itself.
+  into the core. Measured at **1104 KB/s** with 8KB requests, 6.3 times what
+  Redbook audio needs on its own. Reads are rounded to 512 byte boundaries.
+* **The file layer.** `0x0190` says where the file the user picked lives and
+  `0x0192` opens another next to it, so the core can be handed a cue and open
+  the bin the cue names. The Pocket's file browser cannot do this by itself.
+* **The cue parser.** `rtl/pce/cd_toc.sv`, streaming, no host. Track numbers,
+  types, sector sizes and the byte offset of every track in the bin.
+* **The drive model.** `rtl/pce/cd_host.sv`, nine SCSI opcodes, phase ordering
+  and status timing as `cd.vhd` demands them.
 
-Still to build: the cue parser, the drive model that answers the SCSI commands
-`cd.vhd` issues, CD-DA streaming and ADPCM. Discs must be **cue plus bin**.
-A bare `.iso` is the data track only, so a game boots and plays silent, and
-`.chd` is compressed in a way that cannot be seek-addressed at all: convert
-with `chdman extractcd` first.
+Still to build: **CD-DA streaming**, which is why Rondo is silent, and ADPCM,
+which is why it has no speech.
+
+Discs must be **cue plus bin**. A bare `.iso` is the data track only, so a game
+boots and plays silent, and `.chd` is compressed in a way that cannot be
+seek-addressed at all: convert with `chdman extractcd` first.
 
 This work is why `core.json` now asks for APF `version_required 2.3` rather
 than `1.1`. **A Pocket on older firmware will not load this core.**
@@ -94,7 +96,7 @@ than `1.1`. **A Pocket on older firmware will not load this core.**
 | Controller turbo | **works**, upstream's |
 | Per-game memory cards | **works**, upstream's |
 | SuperGrafx | **off.** It paid for the cheat engine and it is paying for CD as well. See above |
-| PC Engine CD | **in progress.** The transport and the file layer work on hardware; the drive model is not built. See above |
+| PC Engine CD | **in progress.** Rondo boots and plays on hardware. No CD-DA and no ADPCM yet, so it is silent. See above |
 | Cartridges | not supported |
 | **Show cheats**, the on-screen list of enabled cheats | **works** |
 | A code store meter | not built. The store holds 32 codes, `MAX_CODES` in `cheat_poker.sv` and `cheat_loader.sv`, and the loader stops committing at it, but nothing shows how full it is |

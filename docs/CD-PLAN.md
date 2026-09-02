@@ -226,9 +226,9 @@ which `docs/PLAN.md` §0 measured as strictly better.
 | Phase | Deliverable | Done when |
 |---|---|---|
 | **P0** | **Measure the transport first.** `0x0180` in `core_bridge_cmd.v`, one deferload slot, a counter that reads back to back and reports KB/s. No CD RTL touched. | **Done 2026-09-01, passed on hardware.** 1104 KB/s at 8KB requests, 6.3x CD-DA, no errors. See §5a. |
-| **P0.5** | One build with `EN => '1'` and nothing else, to price the CD block. | ALM and M10K delta recorded in `docs/BASELINE.md`. |
+| **P0.5** | One build with `EN => '1'` and nothing else, to price the CD block. | **Done 2026-09-01.** Fits: 11,575 ALMs (62.6%), 224 M10K (73.0%), timing met. See §5f. |
 | **P1** | `0x0190` and `0x0192`, plus the path struct RAM. Prove it by opening a bin the cue names and reading its first sector. | **Done 2026-09-01, passed on hardware.** `G0 O0 R0 L033 P62696E00`. See §5b. |
-| **P2** | `cd_toc.sv`, the cue parser, modeled on `cheat_loader.sv`. TOC in BRAM: per track, start LBA, sector size, type, file index, byte offset. | A Rondo cue parses to the right track count and start times. |
+| **P2** | `cd_toc.sv`, the cue parser, modeled on `cheat_loader.sv`. TOC in BRAM: per track, start LBA, sector size, type, byte offset. | **Written 2026-09-01 and verified in simulation** against the real Rondo cue, all 22 tracks. See §5d. Not yet wired in or run on hardware. |
 | **P3** | `cd_host.sv`: answers `CD_COMM` with `CD_STAT`/`CD_MSG`/`CD_DOUT`, LBA to offset, sector fetch, `CD_DATA`/`CD_DATA_WR`/`CD_DATA_END`. Data track only, no audio. Uncomment `main.sv`, wire the SDRAM `CD_RAM` path, drive `CD_EN` from a loaded cue. | The System Card reaches its menu and a game reads sector 0. |
 | **P4** | CD-DA: prefetch ring, `CD_AUDIO_WR` at rate, SAPSP, SAPEP, PAUSE, READSUBQ. | Rondo's intro plays in sync. |
 | **P5** | ADPCM, REQUESTSENSE, MODESELECT6, seek latency. | Rondo is playable start to finish. |
@@ -516,18 +516,33 @@ byte.** `data_loader` provides none and `cheat_loader` is built around its
 absence. The same applies here, and it rules out any design that computes the
 track table in a pass at the end.
 
-**Byte offsets are a recurrence, not a multiply.** Per track the parser needs
-the `INDEX 01` time, the `PREGAP` if any, and the sector size from the `TRACK`
-line. Then, with L for start LBA and S for sector size:
+**Byte offsets are a recurrence, and `PREGAP` is not in it.** Per track the
+parser needs the `INDEX 01` time and the sector size from the `TRACK` line.
+With L for start LBA and S for sector size:
 
-    base(k) = base(k-1) + (L(k) - pregap(k) - L(k-1)) * S(k-1)
+    base(k) = base(k-1) + (L(k) - L(k-1)) * S(k-1)
 
-and a sector inside track k sits at `base(k) + (LBA - L(k)) * S(k)`. The
-`- pregap(k)` term is the one that matters: a pregap occupies disc addresses
-and no file bytes, so leaving it out shifts every track after the first by its
-length. Rondo's track 2 has a 225 sector pregap, which is 529,200 bytes at
-2352, and the failure would present as a disc that mounts and then reads
-garbage.
+and a sector inside track k sits at `base(k) + (LBA - L(k)) * S(k)`.
+
+An earlier draft of this section said the opposite, that a `- pregap(k)` term
+was the one that mattered because a pregap occupies disc addresses and no file
+bytes. **That is the textbook reading of a cue and it is wrong for the images
+this core takes.** `chdman extractcd` writes the whole disc, pregaps included,
+and states them in the cue only to describe the structure.
+
+Settled by arithmetic against the real file rather than by reasoning, because
+both models look right and differ by only a few hundred KB. Rondo's bin is
+512,871,728 bytes, 22 tracks, pregaps on 2, 3 and 22:
+
+| model | bytes before track 22 | remainder | in 2048 byte sectors |
+|---|---:|---:|---:|
+| subtract pregaps | 491,026,128 | 21,845,600 | 10666.8 |
+| ignore pregaps | 492,391,728 | 20,480,000 | **10000.0** |
+
+A whole number of sectors is only possible one way. Had this gone in on the
+textbook reading, every track after the first would have been 225 to 375
+sectors out and the disc would have mounted and then read garbage, which is
+the hardest class of bug to attribute.
 
 Techniques worth taking verbatim from `cheat_loader`: `S_SKIP` as the
 catch-all, so `REM`, `CATALOG`, `PERFORMER`, `ISRC` and `FLAGS` cost nothing;
@@ -535,6 +550,394 @@ whole-length keyword matching against a `key_ok` vector, since prefix matching
 is what made it read the wrong field and look like it worked; and a structural
 bound, one `room` term in the commit predicate, so no cue can overflow the
 table however malformed it is.
+
+## 5d. P2 as built
+
+`rtl/pce/cd_toc.sv`, the cue parser. Not yet wired into the core.
+
+Verified in simulation against the real Rondo cue rather than on hardware,
+which for a pure parser is the stronger test: every one of its 22 tracks was
+checked against an independent model, and track 22's byte offset of
+492,391,728 leaves exactly 10,000 sectors of 2048 to reach the file's real
+size of 512,871,728.
+
+Simulation also found a bug that a hardware smoke test would probably have
+missed. A second cue was written to be awkward on purpose: CRLF line endings,
+`REM`, `PERFORMER`, `TITLE`, `FLAGS`, `ISRC` and `POSTGAP` noise, tab indents,
+a filename full of dots, an `INDEX 00`, and **no trailing newline on the last
+line**. The last track vanished. The parser committed a track on the character
+that terminated its `INDEX` line, and a file is not obliged to have one.
+
+The fix is to commit on every digit of the frames field, each one rewriting the
+same entry with a better answer, so the table is correct after every byte
+rather than after every line. That is exactly what the module's own header says
+the absence of an end-of-file signal demands, and the first draft did not do
+it. `prev_lba`, `prev_base` and `prev_size` are promoted only on the
+terminator, because they must stay the state *before* the current track or each
+digit would accumulate onto the last one's answer. A file ending mid-number
+never reaches the promotion and does not need to: there is no following track
+for it to serve.
+
+`PREGAP` is not parsed at all, per the correction in §5c, so the grammar is
+`FILE`, `TRACK` and `INDEX` and everything else falls into the skip state for
+free.
+
+### P2 on hardware: pass
+
+2026-09-01, Rondo's cue loaded into `Disc (cue)`:
+
+    TRACKS 22 LAST 1D594D30
+
+`0x1D594D30` is 492,391,728, byte for byte what simulation produces, and
+512,871,728 minus it is exactly 10,000 sectors of 2048. That one number is the
+accumulation of all 21 tracks before it, so the parse, the offset recurrence
+and the table read-back are all correct on real hardware.
+
+10,790 ALMs (58.4%), 140 M10K, 21 DSP, timing met at +0.090 ns.
+
+Three builds, and each failure was a different kind:
+
+1. **Missed timing by 5.445 ns.** `docs/PLAN.md` section 5 word for word: the
+   incoming byte fed `f_next`, then MSF to LBA through two multiplies, a 32 bit
+   subtract, a 32 by 12 multiply, an add and a mux, all before the first
+   register. `clk_sys_42_95` fell to an Fmax of 35.99 MHz. Fixed by a four
+   cycle commit sequencer, each stage one operation between two registers.
+   It costs nothing: `data_loader` delivers a byte every few cycles and the
+   sequencer is idle again before the next one arrives.
+2. **Two drivers on one register.** Splitting the parser and the sequencer into
+   separate `always` blocks left `c_pend` and `c_promote` written by both.
+   Merged into one block, which also states the priority: the sequencer runs
+   first and the parser second, so a request raised on the cycle one is
+   consumed survives.
+3. **The table was never built.** The second build's block memory bits did not
+   move at all. `rd_track` was tied to a constant with every read output
+   unconnected, so Quartus deleted all three memories, and the build would have
+   proven the arithmetic and nothing about the storage. The diagnostic now
+   reads the table back through the read port, so the number only appears if
+   the memory works.
+
+Note (3) carefully: **only `base_mem` is built even now**, 3,168 bits and one
+M10K, because only `base_q` is read. `lba_mem` and `att_mem` are still removed
+as unused and will appear when P3 connects the drive model. What this proves is
+that the pattern infers into an M10K rather than into flip-flops, which is what
+went wrong in P1, not that all three memories are exercised.
+
+The recurring shape across P1 and P2 is worth stating once: **verilator lints
+and simulates all of this correctly and has nothing to say about inference,
+timing closure or multiple drivers.** Simulation proves the parser is right;
+the fitter proves it is buildable; they fail in disjoint ways and both are
+needed.
+
+## 5f. P0.5: what the CD block costs
+
+Built on `kira` 2026-09-01 with `pce_top.vhd:670` changed from `EN => '0'` to
+`EN => '1'` and nothing else. **Quartus 25.1std**, so unlike every other build
+in this phase it is directly comparable to `docs/BASELINE.md`. 850 s,
+**timing met at +0.070 ns**.
+
+| | cheats only, 25.1 | with the CD block, 25.1 |
+| --- | ---: | ---: |
+| ALMs | 8,950 (48.4%) | **11,575 (62.6%)** |
+| M10K | 134 (43.5%) | **224 (73.0%)** |
+| Block memory bits | | 1,757,560 (56%) |
+| DSP | 17 | 24 |
+| Worst hold | +0.103 ns | +0.070 ns |
+
+**It fits, with 6,905 ALMs and 84 M10K left.**
+
+### The memory cost is exactly attributable
+
+Block memory rose by 688,128 bits over the P2 build, and that number is not
+approximate:
+
+    ADPCM buffer   64KB   524,288 bits
+    CDDA FIFO      4096 x 32   131,072
+    SCSI FIFO      4096 x 8     32,768
+                          ---------------
+                          688,128  exact
+
+So the three memories the specification predicted are the entire block-RAM cost
+of the CD block, with nothing unaccounted for. The ~52 M10K estimate for ADPCM
+was right in isolation; the FIFOs add the rest to 84 blocks.
+
+### The symmetry worth noticing
+
+The stock core before SuperGrafx was removed sat at **225 M10K (73.1%)**. With
+CD enabled it sits at **224 (73.0%)**. Dropping SuperGrafx freed almost exactly
+what PC Engine CD needs. That is coincidence rather than design, but it means
+the trade recorded in the README is now literally true in both directions: the
+second VDC's block RAM is what CD is being built out of.
+
+### What is left for P3 and P4
+
+* **84 M10K.** A 32KB audio ring is 26 of them, leaving 58.
+* **6,905 ALMs** for `cd_host.sv` and the sector fetcher.
+* Timing at +0.070 ns is the tightest of the phase, and that is *before* the
+  drive model exists. This is the number to watch, not the ALM count.
+
+**This is a floor, not the final cost.** With `EN => '1'` and the host ports
+still commented out in `main.sv`, the CD block's inputs are tied low and some
+logic folds that a real host would keep alive. The three memories are
+structural and exact; the ALM figure will grow when the ports are connected.
+
+## 5e. P3 specification, from the RTL and the reference
+
+Five parallel reads of `cd.vhd`, `SCSI.vhd`, `pcecdd.cpp`, the SDRAM path and
+`pce_top.vhd`. What they settle, before any of it is written:
+
+### The drive is a tick engine
+
+13.33 ms per tick, which is 75 Hz single speed, throttled to 16 ms per tick
+while a data read is in progress. Every latency in the reference is counted in
+ticks. So `cd_host.sv` is a tick counter with a command decoder beside it, not
+a per-command state machine.
+
+### The protocol, exactly
+
+* `CD_COMM_SEND`, `CD_DOUT_SEND` and `CD_DATA_END` are **one-clock pulses**.
+* `CD_STAT_GET` and `CD_DOUT_REQ` are level-sampled into sticky flags: pulse
+  for one clock, never hold, or the core issues status phases forever.
+* `CD_STAT` is sampled about **1.05 ms** after the pulse and `CD_MSG` about
+  **2.2 ms** after. Set both before pulsing and hold them until the next
+  command.
+* Phase arbitration is strict priority, `SEL_N` then status then data then
+  data-out. **Pulsing `CD_STAT_GET` while sector bytes are still queued makes
+  the status jump the queue** and the rest of the data arrives after the
+  message. Order is: command, all data, `CD_DATA_END`, then status.
+* CDB length comes from a table indexed by the **opcode's high nibble**, not
+  SCSI group codes. The vendor opcodes `0xD8` `0xD9` `0xDA` `0xDD` `0xDE` are
+  all 10 bytes. Bytes above the CDB length are stale from the previous command
+  and must be masked.
+* Everything is on `clk_sys_42_95`, so the sector path crosses from the bridge
+  clock.
+
+### What is simpler than expected
+
+* **The message byte is always 0x00**, and only GOOD and CHECK CONDITION are
+  ever sent. Sense is set in exactly two places: TESTUNIT with no disc, and an
+  unknown opcode.
+* **Subcode is not needed at all.** `cd.vhd` has no subcode port. The 98 byte
+  packets, the bit-reversed CCITT CRC and the eight-channel interleave in the
+  reference all go to a MiSTer channel this core does not have.
+* **The seek model can wait.** It is a 14 group CLV table, and the reference
+  has a fast-seek path that sets latency to zero.
+* **Slots 0 and 1 need no manifest change.** The System Card is a 256KB image
+  through the ordinary HuCard ROM path, and CD backup RAM is the same 2KB
+  object at the same address as HuCard backup RAM.
+* **Leave `AC_EN` at 0.** The Arcade Card prunes cleanly and independently, and
+  it would cost 2MB of SDRAM, a 32-bit barrel shifter and rotator, and about
+  385 flops for four games.
+
+### What is harder than expected
+
+* **The ADPCM buffer is 64KB of on-chip RAM**, `cd.vhd:629`, about **52
+  M10Ks**. At 140 of 308 used today that lands the core near 192 before the
+  drive model has a single register. It is not optional even for plain
+  CD-ROM2.
+* **`READ6` and `PAUSE` flush the entire CDDA FIFO** through `STOP_CD_SND`. So
+  the core's 92.9 ms of audio buffering is zero again after every data sector,
+  and the host must re-prime 16KB from its own memory. This is what makes a
+  32KB host ring necessary rather than optional, and it corrects an earlier
+  note here that the core FIFO alone covered the 46 ms stall.
+* **Underrun ends a transfer silently.** An empty SCSI FIFO at any byte
+  boundary pulses `CD_DATA_END`, which the CPU reads as end of transfer. A
+  short read looks like a successful short read.
+* **`K[7]` is `not CD_EN`**, the CD-unit presence bit every read of `$1000`
+  returns. So `cd_en` is a per-load mode bit, not a global setting: a HuCard
+  game that branches on it would take the CD path and find nothing.
+
+### The minimal change list
+
+1. `pce_top.vhd:670`, `EN => '0'` becomes `EN => CD_EN`. Nothing else matters
+   until this changes.
+2. `main.sv:321-325`, uncomment the `cd_en` driver, keeping its clear on
+   `cart_download`.
+3. `main.sv:228-252`, reconnect the `CD_RAM_*` and CD status, command and data
+   port groups. They are floating inputs and dangling outputs today.
+
+On (3): `cd_ram_a`, `cd_ram_rd`, `cd_ram_wr` and `cd_ram_do` are **undriven in
+the shipping core** yet are consumed by the live SDRAM expressions. Quartus
+ties them low and the build behaves, so today's correctness rests on a
+synthesis default rather than on the RTL. Reconnecting the port group fixes it
+as a side effect.
+
+`pce_top.vhd:600` is already live and already correct, and it is load-bearing
+for memory correctness rather than an optimisation: it suppresses `ROM_RD`
+whenever CD RAM is selected, which is the only reason ROM and CD reads are
+mutually exclusive and the single SDRAM read port is safe.
+
+## 5g. P3 on hardware: the drive answers, twice wrongly
+
+Built, flashed and run: `bios_3_0_jap.pce` as the cartridge, the Rondo cue in
+`Disc (cue)`. Fit was 12,295 ALMs (66.5%), 227 M10K (74%), 26 DSP, slack
++0.095 ns.
+
+The overlay confirmed both halves of the transport. `TRACKS 22` says the cue
+parsed. `G0 O0 R0 L033 P62696E00` says the path chain rebuilt the name, opened
+the bin into slot 101 and read from it, all three result codes zero.
+
+The System Card boots its logo and stops on `JUST A MOMENT...`, which is where
+it polls the drive. Two bugs, one of them the cause and one of them next in
+line.
+
+### The drive never said it had a disc
+
+`dstate` came up `DS_NODISC` and had no transition out of it. Every
+`TEST UNIT READY` therefore answered CHECK CONDITION with NOT READY / no disc,
+which is a truthful report of the model's own state and a false report of the
+machine. The System Card polls that before it does anything else.
+
+The model was ported from `pcecdd.cpp`, where the tray is a real thing that
+opens and closes and the host tells the drive when a disc arrives. Here the cue
+*is* the disc: there is no insertion event to port, so the transition had no
+obvious place to live and ended up with none. `cd_en` is already
+`track_count != 0`, so reaching the run branch at all means a disc is loaded.
+
+Fixed ahead of the case statement, so a command arriving in the same cycle
+still overrides it: last assignment inside one always block takes effect.
+
+### Every sector would have been off by one byte
+
+`cd_fetch` registers its read, so `sec_data` trails `sec_addr` by a clock.
+`S_PUSHSEC` captured on the same cycle it presented the address, and advanced
+the address in the low phase rather than the strobe phase. The result: push #1
+a stale byte, push #2 byte 0, and byte 2047 never sent at all.
+
+This is the third time in this project a registered read has been consumed a
+cycle early, after the P1 bridge read and the P2 TOC read. It is the same
+mistake each time and it is invisible in the RTL, because nothing about
+`data <= sec_data` looks wrong.
+
+It would also have been near-impossible to diagnose from the outside. A sector
+that is 2048 bytes long and entirely wrong is not a hang or a glitch; the
+System Card would have loaded a corrupt boot sector and done something
+arbitrary. It only surfaced because bug one was in front of it and forced a
+line-by-line read.
+
+Fixed by parking `sec_addr` on 0 while the fetch is in flight, which costs
+nothing because the fetch takes thousands of clocks, and advancing in the
+strobe phase so the address leads its byte by a full phase.
+
+### The drive model got a diagnostic line
+
+`dbg_state` was a 4-bit output wired to nothing. Replaced with a 26-character
+overlay line:
+
+    T22 C0007 O08 S5 D2 F0003
+
+tracks, commands received, last opcode, sequencer state, drive state, sectors
+fetched. Counters are snapshotted onto a 95 us divider before crossing to the
+overlay clock, so a 16-bit count cannot tear mid-digit.
+
+It sits below the two probes in the OSD priority and above the TOC line, and
+carries the track count in its first field so displacing `TRACKS nn` loses
+nothing. The TOC line's own `LAST` field is meaningless in P3 anyway: `rd_track`
+belongs to `cd_host` now rather than being tied to the last track, so it shows
+whichever entry the drive is pointing at, and at idle that is none.
+
+The lesson from P1 and P2 was to measure rather than reason, and P3 was flashed
+without a way to see inside the one new block. That was the actual error here;
+the two bugs were ordinary.
+
+## 5h. P3b on hardware: the drive works, the bytes do not
+
+`T22 C0000 OFF S0 D1 F0000` at the ready prompt, `T22 C0006 O08 S0 D1 F0002`
+after RUN. `D1` is DS_IDLE, so the drive reports a disc; six commands went
+through, the last of them `READ6`; two sectors were fetched. The System Card
+gets past the drive poll, reaches `PUSH RUN BUTTON!`, redraws as SUPER
+CD-ROM(2), and stops on `LOAD ERROR!`.
+
+So the protocol works end to end. What is wrong is the content.
+
+### The addressing is right, checked against the disc
+
+Rondo's track 1 is AUDIO and its data track is track 2, MODE1/**2048**, at
+INDEX 01 00:48:65 = LBA 3665. The recurrence puts its base at 3665 * 2352 =
+8,620,080, and that offset in the bin is Shift-JIS copyright text with
+`PRODUCER`, `DIRECTOR` and `BIOS MAIN CODE, CD-PLAYER` in it. Subtracting the
+225 sector PREGAP instead gives 8,090,880, which is audio. **The PREGAP
+question is now settled against the disc rather than against the file length.**
+
+The IPL is the next sector, absolute LBA 3666, carrying
+`PC Engine CD-ROM SYSTEM` at 0x20 and a header of
+`00 00 02 | 01 | 00 30 | 00 30`: load one sector from "2" to 0x3000 and execute
+there. Data-track sector 2 is HuC6280 code with `JSR $E006` and `JSR $E05A` in
+the first 0x50 bytes, both System Card entry points. So the "2" is relative to
+the data track, the System Card adds the base it got from `GETDIRINFO`, and the
+absolute LBA that reaches `READ6` is one this model maps correctly.
+
+### What is left is alignment
+
+Every data sector on this disc sits at 8,620,080 + n*2048, and 8,620,080 is 48
+past a 512 byte boundary. The 2352 byte audio track in front of the data track
+puts it there and it stays there for the whole track.
+
+Every offset P0 and P1 ever read from was zero. Nothing in the APF material
+this tree carries says whether a data slot read may begin at an arbitrary byte,
+so this is not asserted as the cause. It is the only hypothesis left standing
+once addressing is verified, and the fix is correct whether or not the
+transport cared: `cd_fetch` now rounds down to a 512 byte boundary, asks for
+2560 bytes instead of 2048, and starts the sector `skew` bytes in. Two more
+M10K for the wider buffer, since 2560 rounds up to 4096.
+
+### The overlay got four pages
+
+One line could not carry it. The diagnostic now cycles four pages on its own
+timer, about 1.6 s each, so none of them costs one of the fifteen APF menu
+variables already spent:
+
+    0  T22 C0006 O08 S0 D1 F0002    tracks, commands, opcode, state, drive, fetches
+    1  H 00 DE DE DE 08 08          the last six opcodes, oldest first
+    2  L00000E52 A00838830          last READ6 LBA, last fetch offset
+    3  B00000201                    first four bytes of the last sector
+
+Pages 2 and 3 are the ones that matter: they say what the System Card asked
+for, where that landed in the bin, and whether the bytes that came back are the
+bytes that are there. The whole line is registered on the 95 us divider rather
+than each field separately, so a page change can never show half of one page
+and half of the next.
+
+## 5i. P3d on hardware: Rondo boots and plays
+
+Konami logo, castle intro, title card, stage 1 with Richter on the wagon. The
+CD path works end to end: TOC, open, seek, sector fetch, SCSI phasing.
+
+In stage 1, 546 sectors in:
+
+    T22 C0042 OD9 S0 D3 F0222
+    H 08 08 08 08 D8 D9 E0
+    L00000EFD A0088E830
+    B00034000
+
+`E0` is the whole transport verdict: not one fetch returned an error across the
+boot and a stage of play.
+
+### What actually fixed it
+
+Two builds were spent on a fetcher that read a slot nothing had opened.
+`path_start` was written only from bridge 0x414, the debug menu toggle. The
+first P3 run happened to have the probe triggered by hand, which is why the
+chain looked proven; the two runs after it did not, so slot 101 was never
+opened and every 0x0180 failed into an untouched buffer. The drive dutifully
+pushed 2048 zero bytes and the System Card said LOAD ERROR.
+
+`F` counted up the whole time, because the command completed. It completed
+unsuccessfully, and no diagnostic carried the result code. `E` exists now for
+that reason: one field, and this would have been one run instead of two.
+
+The 512 byte rounding in `cd_fetch` was needed as well. Both were real, which
+is why fixing only the second one did not help.
+
+### No audio, and exactly why
+
+`D3` is DS_PLAY and the last opcodes are `D8 D9`, SAPSP and SAPEP. The game is
+asking for CD-DA on nearly every screen and getting GOOD back from a model that
+never asserts `audio_wr`. That is P4 as specified in 5e, not a defect: the
+track table already carries what it needs, the drive already tracks the play
+window and the modes, and nothing streams.
+
+ADPCM is untouched and is P5. Rondo uses it for voice, so speech will still be
+missing once CD-DA plays.
 
 ## 6. Risks
 
@@ -557,6 +960,11 @@ table however malformed it is.
 
 1. Exact minimum APF `version_required` for `0x0180`, `0x0190`, `0x0192` and
    `deferload`.
+1a. ~~May a data slot read start at an arbitrary byte?~~ **Not isolated.**
+   `cd_fetch` rounds down to a 512 byte boundary and asks for the extra block,
+   so the question no longer blocks anything. It was fixed in the same build as
+   the unopened slot, so which of the two the LOAD ERROR belonged to was never
+   separated, and it is not worth a build to find out.
 2. ~~Does `0x0192` hold the file open across many `0x0180` reads?~~ **Answered
    2026-09-01: it holds.** P1's `R0` is a sector read out of the slot `0x0192`
    opened, issued as a separate command well after the open returned. What is

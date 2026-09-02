@@ -6,6 +6,8 @@ set_global_assignment -name QIP_FILE           [file join $::quartus(qip_path) "
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) "pce/arcade.sv"]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) "pce/cache_2way.sv"]
 set_global_assignment -name VHDL_FILE          [file join $::quartus(qip_path) "pce/CEGen.vhd"]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) "pce/cd_toc.sv"]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) "pce/cd_host.sv"]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) "pce/cheat_font.sv"]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) "pce/cheat_loader.sv"]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) "pce/cheat_osd.sv"]

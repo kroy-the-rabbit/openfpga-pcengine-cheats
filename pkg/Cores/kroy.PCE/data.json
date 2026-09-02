@@ -38,15 +38,15 @@
         "size_maximum": "0x100000"
       },
       {
-        "name": "Disc (probe)",
+        "name": "Disc (cue)",
         "id": 100,
         "required": false,
         "parameters": "0x00000009",
-        "deferload": true,
         "extensions": [
-          "cue",
-          "bin"
-        ]
+          "cue"
+        ],
+        "address": "0x30000000",
+        "size_maximum": "0x10000"
       },
       {
         "name": "Disc data",
