@@ -117,6 +117,10 @@ module cd_host (
     input  wire        aud_dm,
 
     // Diagnostic block for the overlay: four rows of 26 characters, row 0 in
+    // Straight from cd.vhd, same clock, so no crossing. Its port carries the
+    // bit layout; only the low half is on screen, the high half is ADPCM_LEN.
+    input  wire [31:0] dbg_cd,
+
     // the most significant 156 bits. Composed here so the whole of it lives in
     // one file. See the assembly at the foot.
     output wire [935:0] line
@@ -301,6 +305,26 @@ module cd_host (
   reg [31:0] last_lba;                 // LBA of the last READ6
   reg [31:0] last_off;                 // byte offset the last fetch asked for
   reg [31:0] sec_head;                 // first four bytes handed to the core
+  // A sum of every byte of the sector as it goes out, and the count byte the
+  // READ6 asked for. The offset arithmetic is verified against the disc, so
+  // what is left to doubt is the content: with the LBA on row 2 the same sum
+  // can be computed from the bin on a PC and the two compared. If they agree
+  // the sector left here byte perfect and the fault is past this module.
+  reg [15:0] sec_sum;
+  reg [ 7:0] rd_cnt0;
+
+  // Sectors the game asked for, against `fetch_count` which is what it got.
+  // The sector content is proven byte perfect and the game still lands in the
+  // wrong place, so the remaining way to corrupt it is to deliver fewer
+  // sectors than a READ6 asked for: the game fills part of a buffer, believes
+  // it is loaded, and jumps into whatever the hole leaves behind. These two
+  // numbers side by side answer that outright, and nothing so far has ever
+  // compared them.
+  reg [15:0] req_sec;
+  // SCSI RST assertions. The CPU holds RST to abort, which abandons a command
+  // mid transfer here, and that is one way the count could come up short.
+  reg [ 7:0] rst_cnt;
+  reg        cd_reset_d;
   reg [ 7:0] hist0, hist1, hist2, hist3, hist4, hist5;   // hist5 is newest
 
   wire [2:0] ds_resume = aud_play   ? DS_PLAY
@@ -312,6 +336,10 @@ module cd_host (
     dout_req    <= 1'b0;
     data_wr     <= 1'b0;
     aud_restart <= 1'b0;
+
+    // Counted on the edge: cd_reset is a level the CPU holds.
+    cd_reset_d <= cd_reset;
+    if (cd_reset && !cd_reset_d) rst_cnt <= rst_cnt + 8'd1;
 
     // cd.vhd edge detects both of these and shares one CD_DATA between them,
     // so they are strobes here for the same reason data_wr is.
@@ -343,6 +371,8 @@ module cd_host (
       sep_cdb    <= 48'd0;
       subq_cnt   <= 16'd0;
       ended_cnt  <= 16'd0;
+      req_sec    <= 16'd0;
+      rst_cnt    <= 8'd0;
       off_mode   <= OFF_DATA;
       cmd_count  <= 16'd0;
       fetch_count<= 16'd0;
@@ -516,6 +546,9 @@ module cd_host (
               scan_target <= {8'd0, cb(4'd1), cb(4'd2), cb(4'd3)} & 32'h001F_FFFF;
               off_mode    <= OFF_DATA;
               cnt       <= (cb(4'd4) == 8'd0) ? 9'd256 : {1'b0, cb(4'd4)};
+              rd_cnt0   <= cb(4'd4);
+              req_sec   <= req_sec + ((cb(4'd4) == 8'd0) ? 16'd256
+                                                         : {8'd0, cb(4'd4)});
               dstate    <= DS_READ;
               scan_i    <= 7'd1;
               track     <= 7'd1;
@@ -809,6 +842,7 @@ module cd_host (
             // last_off moved every sector made a 32 sector READ6 report two
             // different points and look like an offset bug.
             last_lba  <= lba;
+            sec_sum   <= 16'd0;
             // Park the read address on byte 0 here rather than on the way
             // out. cd_fetch registers its read, so sec_data trails sec_addr
             // by a clock; parking it now means byte 0 is already presented
@@ -855,6 +889,7 @@ module cd_host (
             // The first four bytes of every sector, so the overlay can say
             // whether the transport delivered the sector that was asked for.
             if (push_i < 12'd4) sec_head <= {sec_head[23:0], sec_data};
+            sec_sum <= sec_sum + {8'd0, sec_data};
             // Advance in the strobe phase, not the low one. sec_data trails
             // sec_addr by a clock and a byte takes two, so the address has to
             // move a full phase ahead of the byte that consumes it.
@@ -926,18 +961,19 @@ module cd_host (
   //   T22 C001C OD9 S0 D3 F00C9    track count, commands answered, last
   //                                opcode, sequencer state, drive state,
   //                                sectors fetched
-  //   H 08 08 08 08 D8 D9 E0       the last six opcodes oldest first, then the
-  //                                last non-zero fetch result
+  //   H 08 08 08 08 D8 D9 E0 V00   the last six opcodes oldest first, the last
+  //                                non-zero fetch result, and SCSI RST aborts
   //   L00000F5D A008BE830 Y0142    the LBA of the last READ6, the byte offset
   //                                it became, and READSUBQ commands answered
-  //   A0648 E0008 K2 W8R8 U0 N0    audio reads that worked, reads that failed,
-  //                                the last failure code, the two ring
-  //                                pointers, and how full the ring looks from
-  //                                the fetcher's side and the reader's
-  //   Q 02 40 R 00 40 P1 Z0003     SAPSP's byte 1 and byte 9, then SAPEP's,
-  //                                then whether audio is playing, then play
+  //   M0000 N20 R0176 S057B3820    ADPCM_LEN, the count byte the READ6 asked
+  //                                for, every sector every READ6 has asked
+  //                                for, and where the audio was told to start
+  //   Q 00 40 03 26 14 P1 Z0000    SAPSP in full: mode, address form, and the
+  //                                three position bytes. Then playing, and
   //                                regions that reached their end
-  //   S01CE2580 X02EC6E30          the audio start and end byte offsets
+  //   R 01 40 04 50 48 X06293E50   SAPEP the same, then the end offset it
+  //                                resolved to
+
   //
   // Rows 2 and 4 are the pair that says why a load stopped. `F` against `Y`
   // separates a transport that stopped delivering from a game polling the
@@ -945,6 +981,89 @@ module cd_host (
   // still. `Z` against row 5 separates the two ways music can stop early, a
   // region that genuinely reached the end offset on screen, or something that
   // told it to stop; the mode bytes on row 4 say which command did.
+  //
+  // Row 3 answers whether a sector arrived intact. The offset arithmetic is
+  // verified against the disc: LBA 0x0F5D resolves to 0x008BE830 and the bin
+  // holds E5 E5 E5 E5 there, which is what the overlay showed. So position is
+  // not in doubt and content is. `B` and `G` with the LBA on row 2 are enough
+  // to recompute the same sum from the bin on a PC: if they agree the sector
+  // left this module byte perfect and the corruption is past it, in the ADPCM
+  // DMA or in what the CPU does with it.
+  //
+  // `N` is the count byte rather than the running `cnt`, because the question
+  // is what was asked for, not what is left. A multi sector READ6 that crosses
+  // a track boundary keeps the track it started in, which has never mattered
+  // while Rondo's data was one track and would matter here.
+  //
+  // `D` is SCSI.vhd's own count of the bytes it handed the CPU in a data in
+  // phase, reset when a command is selected. It has existed all along as
+  // DBG_DATAIN_CNT and nothing was connected to it. Against `N` it is the only
+  // thing that separates "the drive sent it" from "the CPU got it": a 32
+  // sector read should hand over 0x10000, a 12 sector read 0x6000. Short means
+  // the data phase ended early, which SCSI.vhd does the moment its FIFO runs
+  // dry, and the game would fill part of a buffer and be told GOOD.
+  //
+  // `R` against `F` on row 0 is asked for against delivered, and both read
+  // 0176 on hardware: the drive model delivers every sector it is asked for,
+  // byte perfect, so nothing upstream of the FIFO is losing anything. `G` proved a sector arrives byte perfect, so
+  // corrupt content is ruled out; delivering fewer sectors than were asked for
+  // is not, and it produces exactly what is seen. The game fills part of a
+  // buffer, is told GOOD, believes it is loaded, and jumps into the hole. If
+  // R and F ever differ, that is the bug. `V` counts SCSI RST aborts, which is
+  // one way a transfer could be cut short.
+  //
+  // ADPCM is not where the freeze is, which P13 established by putting the
+  // whole engine on screen: both failure modes show ADPCM_CTRL 00 and only
+  // ADPCM_END set, with no PLAY, no DMA_EN and no DMA_RUN. The stall theory
+  // that build was made to catch does not happen, so the engine comes back off
+  // the rows.
+  //
+  // What both failures have in common is this command pair. In one the game
+  // issues SAPSP and SAPEP 19 times a second at the same region for ever; in
+  // the other it issues SAPSP, gets no further, and sits at DS_PAUSE. And in
+  // every frame ever captured `Z` is 0000: no play region has ever reached its
+  // end.
+  //
+  // Two bytes of each command was not enough to say what was being asked for,
+  // so both are now shown in full. `Q` and `R` carry the mode byte, the byte 9
+  // that picks the address form, and the three position bytes, which for the
+  // MSF form the game always uses are minutes, seconds and frames in BCD.
+  // Against `S` and `X`, the offsets those resolved to, that says whether the
+  // drive is being asked for what it thinks it is.
+  //
+  // The old `I` field, retired: A frame of
+  // the game running and a frame of it hung differ in exactly one bit of the
+  // old wider field, ADPCM_HALF, with the SCSI phase, the command count, the
+  // sector count and the checksums all identical. The bus sitting in STATUS
+  // phase turned out to be the normal idle state, visible while the game plays
+  // perfectly well, so it was never the hang it looked like.
+  //
+  //   bit 7 ADPCM_PLAY   6 ADPCM_DMA_EN   5 ADPCM_DMA_RUN
+  //       4 DMA_WRITE_PEND
+  //       3 ADPCM_READ_PEND  2 ADPCM_WRITE_PEND
+  //       1 ADPCM_END        0 ADPCM_HALF
+  //
+  // DMA_EN and DMA_RUN set with `M` not moving is a stalled DMA, and that is
+  // the specific thing to look for: ADPCM takes its bytes off the SCSI bus and
+  // only advances during a data in phase, and this model ends that phase
+  // between every sector where a real drive runs all 32 in one. `K` is
+  // ADPCM_CTRL, so what the game asked for is on screen next to what happened.
+  //
+  // The rest of the old field is retired, having answered: no interrupt was
+  // ever armed and the bus was never stuck. The CPU stops issuing SCSI commands
+  // and never resumes, so `C` and `F` stand still while the game is plainly
+  // alive; only two things do that, and these sixteen bits hold both.
+  //
+  //   bit 15 IRQ_N, low while an interrupt is asserted
+  //       14 CD_DTR_EN   13 CD_DTR      12 CD_DTD_EN   11 CD_DTD
+  //       10 ADPCM_END_EN 9 ADPCM_END    8 ADPCM_HALF_EN 7 ADPCM_HALF
+  //        6 BSY_N  5 REQ_N  4 MSG_N  3 CD_N  2 IO_N  1 SEL_N  0 ACK_N
+  //
+  // An enable set with its flag clear is the CPU waiting on that interrupt.
+  // The low seven are active low, so 7F is bus free: anything else at a freeze
+  // means the bus never went free and the CPU cannot arbitrate to send the
+  // next command, which looks identical from outside and is a different bug.
+  // `M` on row 3 is ADPCM_LEN, which says whether ADPCM is draining at all.
   //
   // Rows 1 and 2 are the older pair: what the game asked for and where it
   // landed. Row 3 says whether the audio ring is still turning under all of
@@ -955,7 +1074,8 @@ module cd_host (
                    E_ = 6'd37, F_ = 6'd38, H_ = 6'd40, L_ = 6'd44, N_ = 6'd46,
                    G_ = 6'd39, K_ = 6'd43, U_ = 6'd53,
                    O_ = 6'd47, P_ = 6'd48, Q_ = 6'd49, R_ = 6'd50, S_ = 6'd51,
-                   T_ = 6'd52, W_ = 6'd55, X_ = 6'd56, Y_ = 6'd57, Z_ = 6'd58;
+                   T_ = 6'd52, W_ = 6'd55, X_ = 6'd56, Y_ = 6'd57, Z_ = 6'd58,
+                   I_ = 6'd41, M_ = 6'd45, V_ = 6'd54;
 
   function automatic [5:0] hx(input [3:0] v);
     begin
@@ -1008,8 +1128,8 @@ module cd_host (
   wire [155:0] row1 = {
       H_, SP, hx2(hist0), SP, hx2(hist1), SP, hx2(hist2), SP,
               hx2(hist3), SP, hx2(hist4), SP, hx2(hist5), SP,
-      E_, hx(fetch_err),
-      SP, SP, SP, SP
+      E_, hx(fetch_err), SP,
+      V_, hx2(rst_cnt)
   };
 
   wire [155:0] row2 = {
@@ -1019,12 +1139,10 @@ module cd_host (
   };
 
   wire [155:0] row3 = {
-      A_, hx4(aud_ok), SP,
-      E_, hx4(aud_bad), SP,
-      K_, hx(aud_err), SP,
-      W_, hx(aud_wr), R_, hx(aud_rd), SP,
-      U_, hx(aud_room), SP,
-      N_, hx(aud_level), SP
+      M_, hx4(dbg_cd[31:16]), SP,
+      N_, hx2(rd_cnt0), SP,
+      R_, hx4(req_sec), SP,
+      S_, hx8(aud_start), SP
   };
 
   // The two audio commands as they arrived, apart: Q is SAPSP and R is SAPEP,
@@ -1036,16 +1154,17 @@ module cd_host (
   // nothing else can tell those apart.
   wire [155:0] row4 = {
       Q_, SP, hx2(aud_cdb[47:40]), SP, hx2(aud_cdb[39:32]), SP,
-      R_, SP, hx2(sep_cdb[47:40]), SP, hx2(sep_cdb[39:32]), SP,
+                hx2(aud_cdb[31:24]), SP, hx2(aud_cdb[23:16]), SP,
+                hx2(aud_cdb[15:8]),  SP,
       P_, hx({3'd0, aud_play}), SP,
-      Z_, hx4(ended_cnt),
-      SP, SP
+      Z_, hx4(ended_cnt), SP
   };
 
   wire [155:0] row5 = {
-      S_, hx8(aud_start), SP,
-      X_, hx8(aud_end),
-      SP, SP, SP, SP, SP, SP, SP
+      R_, SP, hx2(sep_cdb[47:40]), SP, hx2(sep_cdb[39:32]), SP,
+                hx2(sep_cdb[31:24]), SP, hx2(sep_cdb[23:16]), SP,
+                hx2(sep_cdb[15:8]),  SP,
+      X_, hx8(aud_end)
   };
 
   // The counters run in this clock and the overlay reads them in another, so

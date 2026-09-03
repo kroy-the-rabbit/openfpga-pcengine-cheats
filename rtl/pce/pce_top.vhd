@@ -100,7 +100,10 @@ entity pce_top is
 		VIDEO_HBL	: out std_logic;
 		VIDEO_VBL	: out std_logic;
 
-		BORDER_OUT : out std_logic
+		BORDER_OUT : out std_logic;
+
+		-- Diagnostic only, from the CD unit. See cd.vhd for the bit layout.
+		CD_DBG		: out std_logic_vector(31 downto 0)
 	);
 end pce_top;
 
@@ -703,7 +706,9 @@ port map(
 	
 	CD_SL			=> CDDA_SL,
 	CD_SR			=> CDDA_SR,
-	AD_S			=> ADPCM_S
+	AD_S			=> ADPCM_S,
+
+	CD_DBG		=> CD_DBG
 );
 
 CD_RAM_A  <= '0' & AC_RAM_A when AC_RAM_CS_N = '0' else "1000" & CPU_A(17 downto 0);

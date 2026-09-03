@@ -487,6 +487,14 @@ module core_top (
   // the release build is the one with CD_DIAG back at 0.
   localparam CD_DIAG = 1;
 
+  // Draw the diagnostic block at double size: each 26 character row becomes
+  // two display rows of 13, in 12 pixel cells. The Pocket's screenshots are
+  // 256 pixels wide and a 5 pixel glyph does not survive that; an afternoon
+  // went on misreading 10C1 for 10E1 and 7 for 8, each one a build and a
+  // hardware run. It costs the cheat list every line, so it is a
+  // troubleshooting mode and never ships. See docs/CD-PLAN.md 5n.
+  localparam CD_DIAG_SCALE = 2;
+
   wire         probe_req, path_req;
   wire [ 15:0] probe_cmd, path_cmd;
   wire [ 31:0] probe_p0, probe_p1, probe_p2, probe_p3;
@@ -1006,6 +1014,9 @@ module core_top (
       clk_sys_42_95
   );
 
+  // Straight from cd.vhd, for the diagnostic rows only. See cd.vhd's port.
+  wire [ 31:0] cd_dbg;
+
   wire [935:0] cd_host_line;
 
   cd_host cd_host (
@@ -1065,6 +1076,8 @@ module core_top (
       .aud_req    (cd_aud_req),
       .aud_busy   (cd_aud_busy),
       .aud_dm     (cd_aud_dm),
+
+      .dbg_cd(cd_dbg),
 
       .line(cd_host_line)
   );
@@ -1576,6 +1589,7 @@ module core_top (
       .cd_dout_out     (cd_dout),
       .cd_dout_send_out(cd_dout_send),
       .cd_data_end_out (cd_data_end),
+      .cd_dbg_out      (cd_dbg),
       .cd_reset_out    (cd_reset_lvl)
   );
 
@@ -1640,7 +1654,8 @@ module core_top (
   );
 
   cheat_osd #(
-      .DIAG(CD_DIAG)
+      .DIAG(CD_DIAG),
+      .DIAG_SCALE(CD_DIAG_SCALE)
   ) osd (
       .clk    (clk_mem_85_91),
       .reset  (~reset_n),

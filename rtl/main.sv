@@ -154,6 +154,9 @@ module pce (
     output wire [79:0] cd_dout_out,
     output wire        cd_dout_send_out,
     output wire        cd_data_end_out,
+
+    // Diagnostic only, straight out of the CD unit. cd.vhd carries the layout.
+    output wire [31:0] cd_dbg_out,
     output wire        cd_reset_out
 );
 
@@ -275,6 +278,7 @@ module pce (
       .CD_DATA_WR(cd_data_wr_in),
       .CD_AUDIO_WR(cd_audio_wr_in),
       .CD_DATA_END(cd_data_end_out),
+      .CD_DBG(cd_dbg_out),
       .CD_DM(cd_dm_in),
 
       .CDDA_SL(cdda_sl),

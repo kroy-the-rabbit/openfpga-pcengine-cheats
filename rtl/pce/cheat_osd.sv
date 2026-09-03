@@ -64,7 +64,21 @@ module cheat_osd #(
     // in a shipping build, where Quartus folds the whole branch and its inputs
     // away. Same arrangement as DEBUG_WIPE in cheat_poker: the RTL stays,
     // parameterised off, costing nothing. See docs/CD-PLAN.md P0.
-    parameter DIAG = 0
+    parameter DIAG = 0,
+
+    // Draw every cell at double size. A 5 pixel wide glyph in a 6 pixel cell
+    // survives a photograph of the Pocket's screen but not a 256 pixel PNG of
+    // it: a whole afternoon was lost to reading 10C1 for 10E1, 7 for 8 and B
+    // for 8 off screenshots, each misread costing a hardware round trip.
+    //
+    // At 2 a source row of 26 characters is drawn as two display rows of 13,
+    // so nothing that composes a row has to know: the block, cd_diag and every
+    // producer of a 156 bit line keep their format exactly. 13 cells of 12
+    // pixels is 156 pixels, which fits the 256 pixel mode with room to spare.
+    //
+    // Costs the cheat list every line it has, so this is a troubleshooting
+    // mode and never a shipping one. See docs/CD-PLAN.md 5n.
+    parameter DIAG_SCALE = 1
 ) (
     input  wire        clk,          // clk_sys_42_95, the video clock here
     input  wire        reset,
@@ -109,8 +123,19 @@ module cheat_osd #(
   // fourteen titles instead of seventeen is a trade worth making; P6 sets
   // DIAG to 0 and this returns to one row.
   localparam DIAG_ROWS = 6;
-  localparam HDR_ROWS  = (DIAG != 0) ? DIAG_ROWS : 1;
-  localparam MAX_LINES = ROWS - ROW0 - HDR_ROWS;
+  localparam DBL       = (DIAG != 0 && DIAG_SCALE == 2);
+
+  // Two display rows per source row when doubled, and each is half as wide.
+  localparam HDR_ROWS  = (DIAG == 0) ? 1 : (DBL ? 2 * DIAG_ROWS : DIAG_ROWS);
+  localparam HALF      = 13;                       // characters per display row
+  localparam CELLW     = DBL ? 2 * CELL : CELL;    // pixels across a cell
+  localparam ROWH      = DBL ? 16 : 8;             // scanlines down a row
+  localparam PANEL_COLS= DBL ? (COL0 + HALF) : COLS;
+  localparam ROW0E     = DBL ? 1 : ROW0;
+  // 1 + 12 rows of 16 is 208 lines, inside the 224 of the narrow mode. The
+  // cheat list has nowhere left to go, which is the price of the mode.
+  localparam MAX_LINES = DBL ? 0 : (ROWS - ROW0 - HDR_ROWS);
+  localparam PANEL_H   = (ROW0E + HDR_ROWS + MAX_LINES) * ROWH;
 
   // ------------------------------------------------------------- pixels ----
   reg [8:0] px = 0;
@@ -134,8 +159,8 @@ module cheat_osd #(
   // Plain slices of py, deliberately. The panel is inset by leaving its first
   // ROW0 rows and COL0 columns empty rather than by moving the raster origin,
   // so nothing here has to do arithmetic at pixel rate.
-  wire [4:0] text_row  = py[7:3];
-  wire [2:0] glyph_row = py[2:0];
+  wire [4:0] text_row  = DBL ? py[8:4] : py[7:3];
+  wire [2:0] glyph_row = DBL ? py[3:1] : py[2:0];
 
   // 6 does not divide a bit slice, so the column is counted rather than sliced
   // out of px. Both follow px exactly, one step per active pixel.
@@ -146,21 +171,25 @@ module cheat_osd #(
   // 160 pixel Game Boy screen ends before that point, so it never had to care.
   // 7 bits reaches 127, which covers 512/6 = 85, the widest mode here.
   reg [6:0] text_col = 0;
-  reg [2:0] pixel_col = 0;
+  reg [3:0] pixel_col = 0;          // four bits: a doubled cell is 12 wide
 
   always @(posedge clk) begin
     if (reset || !de) begin
       text_col  <= 7'd0;
-      pixel_col <= 3'd0;
+      pixel_col <= 4'd0;
     end else if (ce_pix) begin
-      if (pixel_col == CELL[2:0] - 3'd1) begin
-        pixel_col <= 3'd0;
+      if (pixel_col == CELLW[3:0] - 4'd1) begin
+        pixel_col <= 4'd0;
         text_col  <= text_col + 7'd1;
       end else begin
-        pixel_col <= pixel_col + 3'd1;
+        pixel_col <= pixel_col + 4'd1;
       end
     end
   end
+
+  // Which bit of the glyph this pixel shows. Doubled, the cell is 12 wide and
+  // every font bit covers two pixels; undoubled it is the plain column.
+  wire [2:0] glyph_bit = DBL ? pixel_col[3:1] : pixel_col[2:0];
 
   // ------------------------------------------------------------- header ----
   // Font indices are ASCII - 32. Spelled out so the header needs no string ROM.
@@ -236,25 +265,33 @@ module cheat_osd #(
   reg [5:0] hdr_char_d1 = 0, hdr_char_d2 = 0, hdr_char_d3 = 0;
 
   // The first ROW0 rows are left blank, which is the vertical half of the inset.
-  wire       above     = (text_row < ROW0[4:0]);
-  wire       in_header = !above && (text_row < (ROW0[4:0] + HDR_ROWS[4:0]));
+  wire       above     = (text_row < ROW0E[4:0]);
+  wire       in_header = !above && (text_row < (ROW0E[4:0] + HDR_ROWS[4:0]));
 
   // Which header row is being filled. Split out rather than part-selected off
   // the subtraction inline, because a part-select on an expression is not
   // something every tool in this flow accepts.
-  wire [4:0] hdr_row_full = text_row - ROW0[4:0];
+  wire [4:0] hdr_row_full = text_row - ROW0E[4:0];
   wire [2:0] hdr_row      = hdr_row_full[2:0];
+
+  // Doubled, two display rows share one source row: the upper draws its first
+  // 13 characters and the lower the remaining 13. So the row halves and the
+  // column gains 13 on the odd one, and nothing upstream has to know.
+  wire [2:0] src_row  = DBL ? hdr_row_full[3:1] : hdr_row;
+  wire [4:0] src_col2 = DBL ? (src_col + (hdr_row_full[0] ? 5'd13 : 5'd0))
+                            : src_col;
 
   // cd_diag registers its read, so presenting the address here lands the
   // character in the same cycle hdr_char_d1 occupies. The RAM holds spaces
   // everywhere outside the text, so the fill counter running past the last
   // column needs no guard of its own.
-  assign diag_raddr = {hdr_row, src_col};
+  assign diag_raddr = {src_row, src_col2};
 
   wire [5:0] hdr_stage1 = (DIAG != 0 && diag_valid) ? diag_rchar : hdr_char_d1;
-  wire [4:0] row_index = text_row - ROW0[4:0] - HDR_ROWS[4:0];
+  wire [4:0] row_index = text_row - ROW0E[4:0] - HDR_ROWS[4:0];
   wire       row_used  = in_header
-                      || (!above && text_row >= (ROW0[4:0] + HDR_ROWS[4:0])
+                      || (!above && MAX_LINES != 0
+                          && text_row >= (ROW0E[4:0] + HDR_ROWS[4:0])
                           && row_index < MAX_LINES[4:0]
                           && {1'b0, row_index} < title_count);
 
@@ -314,10 +351,10 @@ module cheat_osd #(
   // therefore always clear: the gap between letters needs no special case.
   // Indexed only inside the panel: past it the column counter runs on to the
   // end of the line and would address off the end of the buffer.
-  wire in_panel = (text_col < COLS[6:0]);
+  wire in_panel = (text_col < PANEL_COLS[6:0]);
   wire [7:0] bits = in_panel ? line_bits[text_col[4:0]] : 8'd0;
-  assign active = show && de && row_used && in_panel && (py < (ROWS*8));
-  assign ink    = active && bits[3'd7 - pixel_col];
+  assign active = show && de && row_used && in_panel && (py < PANEL_H);
+  assign ink    = active && bits[3'd7 - glyph_bit];
 
 endmodule
 

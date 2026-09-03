@@ -47,7 +47,20 @@ entity cd is
 		
 		CD_SL			: out signed(15 downto 0);
 		CD_SR			: out signed(15 downto 0);
-		AD_S			: out signed(15 downto 0)
+		AD_S			: out signed(15 downto 0);
+
+		-- Diagnostic only, added by this fork; nothing in the CD unit reads it.
+		-- The CPU stops issuing SCSI commands and never resumes, and only two
+		-- things do that: it is parked on an interrupt, or the SCSI bus never
+		-- returned to bus free so it cannot arbitrate. This carries both, so
+		-- one run tells them apart. See docs/CD-PLAN.md 5l.
+		--   31..16 ADPCM_LEN
+		--      15  IRQ_N        14 CD_DTR_EN      13 CD_DTR
+		--      12  CD_DTD_EN    11 CD_DTD
+		--      10  ADPCM_END_EN  9 ADPCM_END       8 ADPCM_HALF_EN
+		--       7  ADPCM_HALF
+		--       6  BSY_N  5 REQ_N  4 MSG_N  3 CD_N  2 IO_N  1 SEL_N  0 ACK_N
+		CD_DBG		: out std_logic_vector(31 downto 0)
 	);
 end cd;
 
@@ -106,6 +119,8 @@ architecture rtl of cd is
 	signal ADPCM_DMA_RUN		: std_logic;
 	signal ADPCM_END			: std_logic;							--ADPCM end reached flag
 	signal ADPCM_HALF			: std_logic;							--ADPCM half reached flag
+	signal IRQ_N_INT			: std_logic;							--IRQ_N, so it can be read back
+	signal SCSI_DATAIN_CNT	: unsigned(15 downto 0);			--bytes taken by the CPU this command
 	signal ADPCM_PLAY			: std_logic;
 	signal ADPCM_FREQ			: std_logic_vector(3 downto 0);
 	signal ADPCM_FADER		: std_logic_vector(2 downto 0);
@@ -551,7 +566,19 @@ begin
 	end process;
 	
 	SEL_N <= not (REG_SEL and EN);
-	IRQ_N <= not ((CD_DTR_EN and CD_DTR) or (CD_DTD_EN and CD_DTD) or (ADPCM_END_EN and ADPCM_END) or (ADPCM_HALF_EN and ADPCM_HALF));
+	IRQ_N_INT <= not ((CD_DTR_EN and CD_DTR) or (CD_DTD_EN and CD_DTD) or (ADPCM_END_EN and ADPCM_END) or (ADPCM_HALF_EN and ADPCM_HALF));
+	IRQ_N <= IRQ_N_INT;
+
+	-- The freeze is in ADPCM: a playing frame and a frozen one differ in one
+	-- bit, ADPCM_HALF, and everything else on screen is identical. ADPCM's DMA
+	-- takes its bytes off the SCSI bus and only advances during a data in
+	-- phase, and this drive model ends that phase between every sector where a
+	-- real one runs all 32 in a single phase. A DMA spanning that gap stalls
+	-- and the CPU spins on it, which is a hang with the sound looping.
+	CD_DBG <= ADPCM_LEN(15 downto 0) &
+	          ADPCM_CTRL &
+	          ADPCM_PLAY & ADPCM_DMA_EN & ADPCM_DMA_RUN & DMA_WRITE_PEND &
+	          ADPCM_READ_PEND & ADPCM_WRITE_PEND & ADPCM_END & ADPCM_HALF;
 	
 	RAM_SEL <= '1' when EXT_A(20 downto 13) >= x"68" and EXT_A(20 downto 13) <= x"87" else '0';
 	RAM_CS_N <= not (RAM_SEL and EN);
@@ -589,7 +616,12 @@ begin
 		
 		CD_DATA		=> CD_DATA,
 		CD_WR			=> CD_DATA_WR,
-		CD_DATA_END	=> CD_DATA_END
+		CD_DATA_END	=> CD_DATA_END,
+
+		-- SCSI.vhd has always counted the bytes it actually handed the CPU in
+		-- a data in phase and nothing has ever read the counter. It is the one
+		-- number that separates "the drive sent it" from "the CPU got it".
+		DBG_DATAIN_CNT => SCSI_DATAIN_CNT
 	);
 
 
