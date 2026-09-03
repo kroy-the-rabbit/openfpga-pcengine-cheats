@@ -1093,3 +1093,178 @@ is not margin to rely on.
 What the overlay actually costs is the overlay: close to 1,000 registers, 936
 of them `line_r`, `cd_host`'s snapshot of the whole six-row block. With
 `CD_DIAG = 0` none of it is built, which is the state a release ships in.
+
+## 5l. The CPU stops asking, and two things could cause it
+
+P7b on hardware. The `dstate` fix in 5k was correct and was not this bug: `Y`
+reads 0000 in every frame, so Rondo never issues READSUBQ and was never waiting
+on the status that fix repaired. In the whole run it sends three opcodes and no
+others: `08`, `D8`, `D9`.
+
+Starting a stage leaves a black screen for ever with ambience looping. There
+`C` and `F` both stand still while the game is plainly still running, so the
+CPU has stopped issuing SCSI commands and does not come back. Two things do
+that and they look the same from outside:
+
+* it is parked waiting on an interrupt. `cd.vhd` has exactly four sources,
+  `CD_DTR`, `CD_DTD`, `ADPCM_END`, `ADPCM_HALF`, and an enable set with its
+  flag clear says which.
+* the SCSI bus never returned to bus free, so it cannot arbitrate to send
+  anything. The phase lines say so directly.
+
+P8 carries both out of `cd.vhd` on a debug word and puts them on row 5 as `I`,
+with `ADPCM_LEN` on row 3 as `M`. **No behaviour changes.** Three times this
+session a single overlay frame was read as a fault and was not one: the
+SAPSP/SAPEP ordering, the title-screen `P1`, and a five second window with no
+commands in it that turned out to be the cinematic loading normally. A frame is
+an instant, and a counter standing still in one frame is not a stopped counter.
+
+The audio side is measured and healthy: 437 reads in the five seconds between
+two frames is 87 a second against the 86 CD-DA needs. Music stopping at the
+title screen is `CDDA_FADE_VOL`, the CD unit's own fader, muting a stream that
+is still being fed correctly.
+
+`cdda_mode` is still one register written by both SAPSP and SAPEP, which is the
+same defect as the shared CDB. It is deliberately left alone: SAPSP arrives
+with byte 1 = 0x00 and SAPEP with 0x01, so separating them would make SAPSP
+pause and nothing would start playback again, silencing music that currently
+works. The character select and the title screen show identical mode bytes with
+different intended outcomes, so the mode byte is not what selects them and
+nothing here is understood well enough to change.
+
+## 5m. The offsets are right, so the question is the content
+
+P7b again, further in. The black screen is not permanent: the game reaches a
+stage and draws it, corrupted. `DD` and `DA` both appear in the opcode history
+now with `Y0001`, so Rondo does use READSUBQ and PAUSE, just later than any
+earlier frame reached. The claim in 5l that it never polls was wrong.
+
+The one number that repeats is `F0176`. Three frames 67 seconds apart hold it,
+and so did two frames of the earlier run: **the game stops after exactly 374
+sectors in two independent runs**, keeps issuing audio commands, and renders
+whatever it has.
+
+The addressing is not the fault, and this is checkable without hardware. The
+cue recurrence puts LBA 0x0F5D at byte 0x008BE830, the overlay showed
+`A008BE830`, and the bin holds `E5 E5 E5 E5` at that offset. Cue INDEX times
+are file relative, so no 150 is subtracted; a first pass that subtracted it
+disagreed with the disc and was wrong.
+
+So P9 measures content. Row 3 becomes the last sector's first four bytes, a sum
+of all 2048, and the READ6 count byte. With the LBA already on row 2 the same
+sum can be computed from the bin on a PC. Agreement puts the sector out of this
+module intact and moves the fault to the ADPCM DMA or the CPU side;
+disagreement puts it in the fetch or the push.
+
+## 5n. A readable overlay, kept for troubleshooting and never shipped
+
+P9 verified the data path and closed two theories, and it also showed that the
+measurement channel was the weakest part of the loop. The Pocket's screenshots
+are 256 pixels wide and the overlay glyph is 5 pixels inside a 6 pixel cell.
+Across one afternoon that produced `10C1` read for `10E1`, `7` for `8`, `B` for
+`8`, and a `G` field that could not be read at all. Every misread cost a
+hardware round trip, and two of them sent the investigation down a wrong path.
+
+`cheat_osd` gains `DIAG_SCALE`. At 2 every cell is drawn 12 pixels wide and 16
+scanlines tall, and each 26 character source row is drawn as two display rows
+of 13. **Nothing that composes a row changes**: `cd_host`'s block, `cd_diag`
+and every producer of a 156 bit line keep their format, because the split is
+done where the character is fetched. 13 cells of 12 pixels is 156 pixels, and
+with the 3 cell inset that is 192 of the 256 available. Twelve rows of 16 plus
+a one row inset is 208 of 224 lines.
+
+The cost is the whole cheat list: `MAX_LINES` is 0 in this mode. That is what
+makes it a troubleshooting mode rather than a feature. A release sets
+`CD_DIAG = 0`, which removes the block, the rows and `cd_host`'s counters
+alike; `CD_DIAG_SCALE` then does not matter. Both switches live in `core_top`
+next to `CD_PROBE`.
+
+### What P9 established, before the mode existed
+
+* **The data path is correct.** Two sectors verified byte for byte against the
+  bin: LBA 0x0F5D at 0x008BE830 reading `E5 E5 E5 E5`, and the offset the
+  overlay reported at the freeze, 0x00980830, reading `00 03 40 00`. Position
+  and content both.
+* **The CPU is not waiting on an interrupt.** `I827F` has `IRQ_N` high with no
+  enable and flag pair armed together.
+* **The SCSI bus is free.** The low seven bits of `I` read 0x7F. The CPU could
+  issue a command and does not.
+
+So 5l's two candidates are both dead. What is left, and unexplained: at the
+freeze the last opcode is `D8` with `X` still `FFFFFFFF`, meaning SAPSP was
+answered and **no SAPEP followed**, where every working frame has `D9` next.
+
+One regularity is noted and explicitly not concluded from: both audio starts
+resolve to exactly 375 sectors, five seconds, into their track, on two
+different tracks. It may be a pre-roll the game intends.
+
+### The hold failures were never ours, and AUTO FIT is why
+
+P10 and P10b both missed hold by about 15 ps, so instead of a third seed the
+compiled design was re-analysed on the runner with `report_timing -hold`, no
+recompile. Every violating path is the same structure, and it is inherited:
+
+    HUC6270:VDC0 | SPR_LINE_D[0][1..3]
+      -> dpram:SPR_LINE_BUF0 ... porta_datain_reg[1..3]
+    Clock Skew 0.413 ns    Data Delay 0.401 to 0.412 ns
+
+The VDC's sprite line buffer. A register into an M10K where clock skew just
+exceeds data delay, so it fails hold by picoseconds and flips sign with
+placement. That one structure accounts for the whole day: -0.017, +0.008,
++0.104, +0.100, -0.017, -0.012, in builds whose contents had nothing to do with
+it. Nothing added by the CD work, the debug word or the overlay ever touched
+that path, and the causes given for those numbers at the time were invented.
+
+`FITTER_EFFORT="STANDARD FIT"` fixes it:
+
+| build | fitter | ALMs | setup | hold | compile |
+|---|---|---|---|---|---|
+| p10  | AUTO FIT      | 15,060 | 1.536 | **-0.017** | 667 s |
+| p10b | AUTO FIT seed 2 | 15,036 | 1.548 | **-0.012** | 667 s |
+| p10c | STANDARD FIT  | 15,048 | 2.432 | **+0.117** | 707 s |
+
+Same area, 40 seconds more compile, and the best margins of the session on both
+setup and hold. AUTO FIT lowers effort once it believes timing is achievable,
+which leaves a marginal path marginal; `tools/podman/build.sh` already carries
+the switch and says so in its own comment.
+
+**Worth deciding:** whether STANDARD FIT becomes the default for this project
+rather than an env var. It would end the reseeding lottery, and the cost is 40
+seconds a build. Left as a question because the qsf is shared with upstream and
+the baseline ALM number should keep coming from an unmodified run.
+
+## 5o. Byte perfect sectors, and the game still lands in the wrong place
+
+The doubled overlay paid for itself on the first frame. Every field read
+cleanly, and `L000010E1` settled that the LBA was 0x10E1 all along: the `10C1`
+that sent an earlier pass chasing a phantom offset error was a misread, not a
+fault.
+
+**The sector is delivered byte perfect.** `G0651` is exactly the 16 bit sum of
+the 2048 bytes at 0x00980830 computed from the bin, and `B00034000` matches its
+first four. Not just the head: the whole sector. Fetch, offset arithmetic and
+push are all correct, end to end, and content corruption is ruled out.
+
+`F0176` also stops being a signal. It reads 374 in every run including ones
+that reach a menu, so 374 sectors is simply what Rondo reads. It was never the
+stall it looked like.
+
+What is actually wrong: the menu boots into a **malformed death screen**. Right
+bytes, wrong destination. With content ruled out, the way left to corrupt a
+load is to deliver fewer sectors than the READ6 asked for. The game fills part
+of a buffer, is answered GOOD, believes it is loaded, and jumps into whatever
+the hole leaves. `N20` says the reads are 32 sectors each and nothing has ever
+compared what was asked for with what arrived.
+
+So P11 adds `R`, every sector every READ6 has requested, to sit beside `F`,
+every sector delivered. If they differ, that is the bug and its size. `V`
+counts SCSI RST aborts as the obvious way a transfer gets cut short.
+
+One more thing changed with no functional change behind it: P9 and P10 were
+instrumentation only, yet the run now gets further than P7b did. **The failure
+is not deterministic**, which is worth remembering before any fix is called
+proven by a single good run.
+
+`I8A13` at that instant has the bus in STATUS phase with REQ asserted and ACK
+not, where an earlier frame read `I827F`, bus free. Both are single instants
+and neither is yet evidence of anything.
