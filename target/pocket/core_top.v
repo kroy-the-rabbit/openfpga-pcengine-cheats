@@ -878,8 +878,10 @@ module core_top (
       datatable_wren <= 1;
 
       datatable_data <= mb128_enable ? 32'h20000 : 32'h800;
-      // Data slot index 1, not id 1
-      datatable_addr <= 1 * 2 + 1;
+      // Data slot index 2, not id 1. In data.json the two selectable media
+      // slots must precede Save so APF derives the nonvolatile filename from
+      // the HuCard or cue rather than from the default System Card.
+      datatable_addr <= 2 * 2 + 1;
     end
   end
 

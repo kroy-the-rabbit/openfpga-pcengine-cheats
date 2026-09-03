@@ -1,26 +1,46 @@
-# CD handoff, 2026-09-03 (evening)
+# CD handoff, 2026-09-03 (night)
 
-Read this, then `docs/CD-PLAN.md`, 5k to 5q for the last two sessions.
+Read this, then `docs/CD-PLAN.md`, 5k to 5s for the last sessions.
 
 ## Where it stands
 
-**Rondo boots, plays, and reaches a stage** from cue plus bin on hardware with
-no host processor. It does not survive play. The failure varies run to run:
-
-* black screen with a sound effect looping, usually the galloping horse
-* the menu booting into a malformed death screen
-* a hard freeze with random sound effects
+**Rondo boots and reaches live stage play** from cue plus bin on hardware with
+no host processor. p19 fixed the phase-dependent shared data-bus corruption
+found after p18, and its hardware counters prove that the fixed collision case
+was exercised. Repeatability across cold launches is not established yet.
 
 | | |
 |---|---|
-| branch | `cd-streaming`, p18 based on `92b51c0` |
-| working tree | p18 source and its hardware result are in this commit |
-| on the card | p18, `pce.rev` md5 `4928e642377f3a9b5e575ab58d0d104f` |
-| build | `FITTER_EFFORT="STANDARD FIT"`, eight for eight on timing |
+| branch | `cd-streaming`, p18 committed as `46f9a34` |
+| working tree | p19 arbitration fix plus p20 save ordering, docs and regression check, uncommitted |
+| on the card | p20, `pce.rev` MD5 `ac08484a444b6bae18520f65f0ae8a00` |
+| build | kira LXC 151, `STANDARD FIT`, setup `+2.297 ns`, hold `+0.098 ns` |
 | worktree | `worktrees/p5` on `cd-adpcm`, nothing committed |
 
-p18 is built, flashed, timing-clean and tested on hardware. The latest batch
-is copied off the removable card under ignored `build/evidence/p18/`.
+p19 screenshots and the two candidate CD saves are copied off the removable
+card under ignored `build/evidence/p19/`. p20 is built, timing-clean, packaged,
+installed and hash-verified. It now needs the hardware test below.
+
+## What p19 found
+
+The three diagnostic screenshots all show `U0158 W0000`. `U` counts registered
+audio tail requests that held off a SCSI byte which the old arbitration would
+have pushed. `W` counts actual `data_wr && audio_wr` overlap. The avoided case
+occurred 344 times, no overlap remained, and the next screenshots show normal
+boss and stage gameplay. The p19 arbitration fix is positively exercised.
+
+The first p19 launch still behaved strangely: it saw no old record, a newly
+created record claimed 32 percent completion, and game startup was corrupted.
+After reboot, deleting that record and creating another led to normal play.
+The card explains the missing record separately. The old CD save is
+`Saves/pce/common/bios_3_0_jap.sav`; the latest is `Saves/.sav`. APF was naming
+the nonvolatile slot before it encountered the selected cue.
+
+p20 reorders the first manifest slots to `0, 100, 1`: Cartridge or System Card,
+cue, Save. This preserves HuCard naming and makes the cue name a CD save. The
+save-size datatable write moved from manifest index 1 to index 2, and the
+manifest checker enforces both facts. The good root `.sav` was not migrated,
+so the test cannot pass accidentally against an old file.
 
 ## What p18 found
 
@@ -58,8 +78,8 @@ sector byte and advance its checksum/address, then let the later `aud_req`
 assignment replace the shared bus byte with audio. The CPU still takes one
 byte and every upstream diagnostic still passes; only its value is wrong.
 That phase-dependent substitution fits the nondeterministic corruption. p19
-must make audio ownership include `aud_req`, not only `aud_busy`, and count
-both avoided opportunities and any actual strobe overlap.
+now makes audio ownership include `aud_req`, not only `aud_busy`, and its
+hardware counters show 344 avoided opportunities with no remaining overlap.
 
 ## Established, so nobody chases it again
 
@@ -82,15 +102,27 @@ All measured on hardware:
 
 ## Still open
 
-1. The freeze and malformed load during play. p19 tests the shared-data-bus
-   collision found after p18 retired the ADPCM theory.
-2. Random or looping sound effects. The p18 capture played appropriate audio;
-   repeatability still has to be established after the data-bus fix.
-3. Two of three SAPSP address forms unexercised.
-4. Eight audio reads fail at startup with APF result 2, unexplained.
-5. **Cheats have never been run against a CD game.** The point of the fork.
+1. p20 save naming and persistence across both core exit and Pocket reboot.
+2. Three clean CD launches to stage play with `U` moving and `W=0000` in each.
+3. HuCard save naming after the shared manifest reorder.
+4. Random or looping sound effects need repeatability after the data-bus fix.
+5. Two of three SAPSP address forms remain unexercised.
+6. Eight audio reads fail at startup with APF result 2, unexplained.
+7. **Cheats have never been run against a CD game.** The point of the fork.
    `Castlevania - Rondo of Blood.cht` is on the card, five titles, six pokes.
-6. Whether `STANDARD FIT` should be the project default rather than an env var.
+8. Whether `STANDARD FIT` should be the project default rather than an env var.
+
+## p20 hardware test
+
+1. Launch Rondo once. It is expected not to see root `Saves/.sav`.
+2. Create a fresh record, quit the core, and check that the card created
+   `Saves/pce/common/Castlevania - Rondo of Blood.sav`. A new root `.sav` or a
+   BIOS-named save fails p20 immediately.
+3. Relaunch the core and verify the same record, then reboot the Pocket and
+   verify it once more.
+4. Launch one HuCard with a known save and confirm its game-named save loads.
+5. Repeat the Rondo launch to stage play three times. Capture `U` and `W` each
+   time. `U` must be nonzero and `W` must stay `0000`.
 
 ## Things that will bite
 
@@ -99,7 +131,7 @@ All measured on hardware:
 * **Find the card by mount point, not `/dev/sdX`.** The letter moves between
   insertions. `findmnt -rn -o SOURCE /run/media/kroy/pocket`.
 * **Merge onto the card, never `--delete`.** Saves, cheats, discs and dumps
-  live there. Unmount after writing.
+  live there. Unmount only when told.
 * **A single overlay frame is worth nothing.** Four times across these sessions
   a transient was read as a fault.
 * **Do not narrate timing slack.** `report.sh` prints per clock worst slack and
@@ -118,20 +150,25 @@ All measured on hardware:
 
 ## Build and flash
 
-Builds run on the runner `root@10.50.1.246`, not locally and not in CI. There
-is no committed wrapper; the one used for p18 lived in a session scratch dir
-and is gone. It did four things:
+Builds run on a remote runner, never locally and never in CI. p20 used kira
+LXC 151 directly at `root@10.50.1.245`; all six public SSH keys published by
+the `kroy-the-rabbit` GitHub account are installed there. `jq` and `ripgrep`
+were also installed, so the runner now completes the manifest checks and
+packaging instead of ending with the old `jq` return code 127.
 
-1. `rsync -a --exclude build/ --exclude .git/ ./ RUNNER:/root/pocket-pcengine/`
-2. `ssh RUNNER 'cd /root/pocket-pcengine && FITTER_EFFORT="STANDARD FIT"
-   BUILD_NAME=p19 tools/podman/build.sh'`, then `tools/podman/report.sh`
-3. rsync `build/p19/{report.txt,elapsed}` and
-   `build/p19/work/projects/output_files/pce_pocket.rbf` back
-4. if `report.txt` has no `^Slack : -`, `BUILD_NAME=p19 tools/podman/dist.sh`
+The p20 source was a tracked-file archive of the live worktree, including the
+uncommitted p19 and p20 changes, extracted at
+`/root/pocket-pcengine-p20-20260903`. The exact source hashes recorded in the
+build are:
 
-The runner has no `jq`, so `report.sh` and `dist.sh` print a `jq: command not
-found` on the packaging step. That is not a build failure. Roughly 720 s.
+* `rtl/pce/cd_host.sv`: `07b545312fe9b94bb66d79d94971e82818756cb031f5a3c51fcff0f1d55bfc5b`
+* `target/pocket/core_top.v`: `f894bb2190d186b0ec5b46bbb15ce350de0deb395bbabfa117bede8bccf8ce5e`
+* `pkg/Cores/kroy.PCE/data.json`: `af25fd012cf074dc28614e190c4beb27685ebf51bbb8773de6c4346669f7c732`
 
-Output lands in `build/p19/dist`. rsync that onto the card without `--delete`,
-verify the `pce.rev` md5 against the source, unmount. **Committing this wrapper
-into `tools/` is worth doing;** it has been retyped every session.
+The build command was `FITTER_EFFORT="STANDARD FIT" NPROC=16 BUILD_NAME=p20
+tools/podman/build.sh`. The runner output is under that checkout's
+`build/p20/`; the pulled and locally packaged output is `build/p20/dist/`.
+Merge that directory onto the mounted card without `--delete`, run `sync`, and
+verify both `pce.rev` and `data.json` in place. The sandbox can misreport the
+card as read-only, so request elevation outside the sandbox for the copy. Do
+not remount the card and do not unmount it unless told.

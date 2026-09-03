@@ -71,6 +71,17 @@ fi
 dupe=$(jq -r '[.data.data_slots[].id] | group_by(.) | map(select(length>1)) | flatten | @csv' "$C/data.json")
 [ -z "$dupe" ] || bad "duplicate data slot ids: $dupe"
 
+# APF derives the nonvolatile filename from the selected asset preceding the
+# save slot. Slot 0 is either a HuCard or the default System Card. Putting the
+# cue after it lets a CD selection replace the default BIOS as the save name;
+# putting Save immediately after both preserves HuCard naming too. The save
+# size datatable address in core_top.v is coupled to this array index.
+media_save_order=$(jq -r '[.data.data_slots[0:3][].id] | join(",")' "$C/data.json")
+[ "$media_save_order" = "0,100,1" ] || bad "first data slots must be 0,100,1 so HuCards and cues name their saves"
+if ! rg -q 'datatable_addr <= 2 \* 2 \+ 1;' "$ROOT/target/pocket/core_top.v"; then
+  bad "core_top.v must publish the save size at data slot index 2"
+fi
+
 # Two slots sharing the upper nibble means two data_loaders answering the same
 # bridge writes.
 dupe=$(jq -r '[.data.data_slots[].address | .[0:3]] | group_by(.) | map(select(length>1)) | flatten | unique | @csv' "$C/data.json")

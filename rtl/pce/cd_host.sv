@@ -123,7 +123,8 @@ module cd_host (
     input  wire        fifo_full,
 
     // Straight from cd.vhd, same clock, so no crossing. Its port carries the
-    // bit layout. All of it is on screen, on row 3.
+    // bit layout. The low half remains on row 3; p18's counters remain in the
+    // high half for later inspection but p19 replaces them on screen.
     input  wire [47:0] dbg_cd,
 
     // the most significant 156 bits. Composed here so the whole of it lives in
@@ -332,6 +333,23 @@ module cd_host (
   reg        cd_reset_d;
   reg [ 7:0] hist0, hist1, hist2, hist3, hist4, hist5;   // hist5 is newest
 
+  // CD_DATA is shared by SCSI data and CD-DA. aud_busy covers the eight clocks
+  // used to emit a stereo frame, except that cd_audio drops it in the same
+  // clock that it raises the last aud_req. The registered request is therefore
+  // part of ownership too. Without it, a push can advance its address and
+  // checksum while the later audio assignment replaces the byte on CD_DATA.
+  wire aud_owns_data = aud_busy || aud_req;
+
+  // p19 proof counters. U counts cycles where the aud_req tail actually held
+  // off a byte that the old arbitration would have pushed. W counts real
+  // overlap at the interface. U moving with W held at zero proves both that
+  // the race was exercised and that the fix excluded it.
+  reg [15:0] aud_tail_stall_cnt;
+  reg [15:0] bus_overlap_cnt;
+  wire push_would_write = !push_ph &&
+      (((state == S_PUSH) && (rsp_len != 5'd0)) ||
+       ((state == S_PUSHSEC) && !fifo_full));
+
   wire [2:0] ds_resume = aud_play   ? DS_PLAY
                        : aud_paused ? DS_PAUSE : DS_IDLE;
 
@@ -378,6 +396,8 @@ module cd_host (
       ended_cnt  <= 16'd0;
       req_sec    <= 16'd0;
       rst_cnt    <= 8'd0;
+      aud_tail_stall_cnt <= 16'd0;
+      bus_overlap_cnt    <= 16'd0;
       off_mode   <= OFF_DATA;
       cmd_count  <= 16'd0;
       fetch_count<= 16'd0;
@@ -397,6 +417,11 @@ module cd_host (
       // CDDA does not run over the SCSI bus, so a bus reset does not stop it.
       if (dstate != DS_NODISC) dstate <= ds_resume;
     end else begin
+
+      if (aud_req && !aud_busy && push_would_write)
+        aud_tail_stall_cnt <= aud_tail_stall_cnt + 16'd1;
+      if (data_wr && audio_wr)
+        bus_overlap_cnt <= bus_overlap_cnt + 16'd1;
 
       // A parsed cue is a disc in the drive, and nothing else was ever going
       // to say so: `dstate` came up as DS_NODISC and had no path out, so
@@ -877,8 +902,8 @@ module cd_host (
         // Two clocks per byte: the core edge-detects the strobe, so it has to
         // return low between bytes.
         S_PUSH: begin
-          if (aud_busy) begin
-            // stand off; the audio frame owns the byte bus
+          if (aud_owns_data) begin
+            // Stand off. Ownership includes the registered tail request.
           end else if (rsp_len == 5'd0) begin
             state <= S_STATUS;
           end else if (!push_ph) begin
@@ -894,11 +919,10 @@ module cd_host (
 
         // -------------------------------------------- push a full sector --
         S_PUSHSEC: begin
-          if (aud_busy || fifo_full) begin
-            // Stand off: either the audio frame owns the byte bus, or the FIFO
-            // is full and the next byte would be dropped. SCSI.vhd guards its
-            // own write with the same flag, so without this the byte is lost
-            // silently rather than delayed.
+          if (aud_owns_data || fifo_full) begin
+            // Stand off. Audio ownership includes the registered tail request;
+            // otherwise that byte replaces a sector byte after its address and
+            // checksum have advanced. A full FIFO also drops the next byte.
           end else if (!push_ph) begin
             data     <= sec_data;
             data_wr  <= 1'b1;
@@ -1155,15 +1179,13 @@ module cd_host (
       Y_, hx4(subq_cnt), SP
   };
 
-  // U counts every byte the ADPCM DMA lifted off the SCSI bus. W counts the
-  // subset it lifted with only DMA_EN set, which is the case nobody asked for:
-  // DMA_RUN clears itself after a sector, DMA_EN does not, so a game that
-  // leaves it set feeds the next data in phase into ADPCM RAM whatever that
-  // phase was for. W moving while O reads 08 is the answer to both the random
-  // samples and the freeze. K is ADPCM_CTRL, I the ADPCM flags.
+  // U counts registered audio tail requests that held off a SCSI byte which
+  // the old arbitration would have pushed. W counts actual cycles with both
+  // write strobes high. The p19 proof is U moving while W remains zero. K is
+  // ADPCM_CTRL, I the ADPCM flags.
   wire [155:0] row3 = {
-      U_, hx4(dbg_cd[47:32]), SP,
-      W_, hx4(dbg_cd[31:16]), SP,
+      U_, hx4(aud_tail_stall_cnt), SP,
+      W_, hx4(bus_overlap_cnt), SP,
       K_, hx2(dbg_cd[15:8]),  SP,
       I_, hx2(dbg_cd[7:0]),   SP,
       R_, hx4(req_sec), SP

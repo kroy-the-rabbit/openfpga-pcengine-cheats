@@ -1365,3 +1365,61 @@ p19 makes the audio hold condition `aud_busy || aud_req` for both response and
 sector pushes. Hardware counters record tail cycles that would previously have
 collided and any remaining `data_wr && audio_wr` overlap. The latter must stay
 zero; the former moving proves the fixed case was exercised.
+
+## 5s. p19 excludes the shared-bus race; p20 fixes CD save naming
+
+p19 reached normal stage play on hardware. Three diagnostic frames during the
+horse scene all show `U0158 W0000`: 344 registered audio tail requests held off
+a SCSI byte, and no cycle asserted both write strobes. The counter that proves
+the old collision opportunity moved, the counter that proves exclusion stayed
+zero, and the following screenshots show the boss and live stage gameplay.
+This is positive evidence for the arbitration fix, not merely an uneventful
+run.
+
+The first p19 launch exposed a separate problem. It reported no saved games,
+then a newly created record appeared at 32 percent and the game started in a
+corrupted state. After a Pocket reboot the malformed record was deleted, a new
+one was created, and the game played normally.
+
+The card identifies the save-selection fault. The prior CD run had created
+`Saves/pce/common/bios_3_0_jap.sav`; p19 created `Saves/.sav`. Both are 2048
+bytes and contain a Rondo backup-RAM record. APF was deriving the nonvolatile
+name before it encountered the selected cue, so a manually selected BIOS named
+one save and a default BIOS left the other name empty. This same data-slot
+ordering defect is the subject of Mazamars312/openfpga-pcengine-cd pull request
+63, whose tested correction puts the save after the cue and before the default
+BIOS.
+
+This core also launches HuCards, so p20 uses the combined ordering `0, 100, 1`:
+Cartridge or System Card, cue, then Save. A HuCard remains the last selected
+medium when no cue is present; a cue replaces the default BIOS as the last
+selected medium for a CD launch. Save moves from manifest index 1 to index 2,
+so the size datatable write moves with it. The manifest check now enforces both
+facts.
+
+p20 hardware verification is filename-first, then gameplay:
+
+1. Launch Rondo from its cue and verify APF uses
+   `Saves/pce/common/Castlevania - Rondo of Blood.sav`, never `Saves/.sav` or a
+   BIOS-named save.
+2. Create or alter a record, quit the core, relaunch it, then reboot the Pocket
+   and relaunch once more. The same record must survive both boundaries.
+3. Launch a HuCard with an existing save and verify its game-named save still
+   loads. The shared manifest must not fix CD saves by regressing HuCards.
+4. Repeat the CD boot to stage play three times. Every run must reach gameplay,
+   `U` must move, and `W` must remain `0000`.
+
+p20 was built on kira LXC 151 with `STANDARD FIT` and installed on the card.
+The full fit took 1363 seconds, used 14,952 of 18,480 ALMs, and passed every
+timing analysis. Worst setup slack is `+2.297 ns`; worst hold slack is
+`+0.098 ns`. The packaged `pce.rev` MD5 is
+`ac08484a444b6bae18520f65f0ae8a00`, verified equal on the card. The packaged
+and deployed `data.json` SHA256 is
+`af25fd012cf074dc28614e190c4beb27685ebf51bbb8773de6c4346669f7c732`.
+
+The good p19 backup-RAM image remains preserved locally under ignored build
+evidence and remains on the card as root `Saves/.sav`. It was deliberately not
+copied into the expected cue-derived path, because doing that would hide
+whether p20 actually chooses the right filename. The first p20 launch can
+therefore report no Rondo record once. Create one, exit the core so APF flushes
+it, and make the filename check before judging persistence.
