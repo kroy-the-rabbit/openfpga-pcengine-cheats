@@ -123,8 +123,8 @@ module cd_host (
     input  wire        fifo_full,
 
     // Straight from cd.vhd, same clock, so no crossing. Its port carries the
-    // bit layout; only the low half is on screen, the high half is ADPCM_LEN.
-    input  wire [31:0] dbg_cd,
+    // bit layout. All of it is on screen, on row 3.
+    input  wire [47:0] dbg_cd,
 
     // the most significant 156 bits. Composed here so the whole of it lives in
     // one file. See the assembly at the foot.
@@ -1058,46 +1058,33 @@ module cd_host (
   // so both are now shown in full. `Q` and `R` carry the mode byte, the byte 9
   // that picks the address form, and the three position bytes, which for the
   // MSF form the game always uses are minutes, seconds and frames in BCD.
-  // Against `S` and `X`, the offsets those resolved to, that says whether the
-  // drive is being asked for what it thinks it is.
+  // Against `X`, the offset SAPEP resolved to, that says whether the drive is
+  // being asked for what it thinks it is.
   //
-  // The old `I` field, retired: A frame of
-  // the game running and a frame of it hung differ in exactly one bit of the
-  // old wider field, ADPCM_HALF, with the SCSI phase, the command count, the
-  // sector count and the checksums all identical. The bus sitting in STATUS
-  // phase turned out to be the normal idle state, visible while the game plays
-  // perfectly well, so it was never the hang it looked like.
+  // A frame of the game running and a frame of it hung differ in exactly one
+  // bit of what is now `I`, ADPCM_HALF, with the SCSI phase, the command
+  // count, the sector count and the checksums all identical. The bus sitting
+  // in STATUS phase turned out to be the normal idle state, visible while the
+  // game plays perfectly well, so it was never the hang it looked like.
   //
   //   bit 7 ADPCM_PLAY   6 ADPCM_DMA_EN   5 ADPCM_DMA_RUN
   //       4 DMA_WRITE_PEND
   //       3 ADPCM_READ_PEND  2 ADPCM_WRITE_PEND
   //       1 ADPCM_END        0 ADPCM_HALF
   //
-  // DMA_EN and DMA_RUN set with `M` not moving is a stalled DMA, and that is
-  // the specific thing to look for: ADPCM takes its bytes off the SCSI bus and
-  // only advances during a data in phase, and this model ends that phase
-  // between every sector where a real drive runs all 32 in one. `K` is
-  // ADPCM_CTRL, so what the game asked for is on screen next to what happened.
+  // That one bit is what row 3 is for now. `U` counts every byte the ADPCM DMA
+  // lifted off the SCSI bus and `W` counts the subset it lifted with DMA_RUN
+  // clear, meaning DMA_EN alone was holding it open. DMA_RUN clears itself
+  // after 2048 bytes; DMA_EN does not, so a game that leaves it set has the
+  // DMA feeding the next data in phase into ADPCM RAM whatever that phase was
+  // for, which plays game data as samples and starves the CPU of the sector it
+  // asked for. `W` moving while `O` reads 08 is the whole case. `K` is
+  // ADPCM_CTRL, so what the game asked for sits beside what happened.
   //
-  // The rest of the old field is retired, having answered: no interrupt was
-  // ever armed and the bus was never stuck. The CPU stops issuing SCSI commands
-  // and never resumes, so `C` and `F` stand still while the game is plainly
-  // alive; only two things do that, and these sixteen bits hold both.
-  //
-  //   bit 15 IRQ_N, low while an interrupt is asserted
-  //       14 CD_DTR_EN   13 CD_DTR      12 CD_DTD_EN   11 CD_DTD
-  //       10 ADPCM_END_EN 9 ADPCM_END    8 ADPCM_HALF_EN 7 ADPCM_HALF
-  //        6 BSY_N  5 REQ_N  4 MSG_N  3 CD_N  2 IO_N  1 SEL_N  0 ACK_N
-  //
-  // An enable set with its flag clear is the CPU waiting on that interrupt.
-  // The low seven are active low, so 7F is bus free: anything else at a freeze
-  // means the bus never went free and the CPU cannot arbitrate to send the
-  // next command, which looks identical from outside and is a different bug.
-  // `M` on row 3 is ADPCM_LEN, which says whether ADPCM is draining at all.
-  //
-  // Rows 1 and 2 are the older pair: what the game asked for and where it
-  // landed. Row 3 says whether the audio ring is still turning under all of
-  // it, and `K` there is sticky, so it is a witness and never a rate.
+  // Retired from these rows, each having answered its question: IRQ_N and the
+  // seven bus lines, since no interrupt was ever armed and the bus was never
+  // stuck; ADPCM_LEN; `N`, reads with a zero sector count; and `S`, the offset
+  // SAPSP resolved to, which the PREGAP fix settled.
 
   // Font indices are ASCII - 32, matching cheat_font.
   localparam [5:0] SP = 6'd0, A_ = 6'd33, B_ = 6'd34, C_ = 6'd35, D_ = 6'd36,
@@ -1168,11 +1155,18 @@ module cd_host (
       Y_, hx4(subq_cnt), SP
   };
 
+  // U counts every byte the ADPCM DMA lifted off the SCSI bus. W counts the
+  // subset it lifted with only DMA_EN set, which is the case nobody asked for:
+  // DMA_RUN clears itself after a sector, DMA_EN does not, so a game that
+  // leaves it set feeds the next data in phase into ADPCM RAM whatever that
+  // phase was for. W moving while O reads 08 is the answer to both the random
+  // samples and the freeze. K is ADPCM_CTRL, I the ADPCM flags.
   wire [155:0] row3 = {
-      M_, hx4(dbg_cd[31:16]), SP,
-      N_, hx2(rd_cnt0), SP,
-      R_, hx4(req_sec), SP,
-      S_, hx8(aud_start), SP
+      U_, hx4(dbg_cd[47:32]), SP,
+      W_, hx4(dbg_cd[31:16]), SP,
+      K_, hx2(dbg_cd[15:8]),  SP,
+      I_, hx2(dbg_cd[7:0]),   SP,
+      R_, hx4(req_sec), SP
   };
 
   // The two audio commands as they arrived, apart: Q is SAPSP and R is SAPEP,

@@ -103,10 +103,10 @@ entity pce_top is
 		BORDER_OUT : out std_logic;
 
 		-- Diagnostic only, from the CD unit. See cd.vhd for the bit layout.
-		CD_DBG		: out std_logic_vector(31 downto 0);
+		CD_DBG		: out std_logic_vector(47 downto 0);
 
-		-- SCSI data FIFO full, so the drive model can keep one data in phase
-		-- open across a whole multi sector read.
+		-- SCSI data FIFO full, so the drive model can stall its push instead of
+		-- having the byte dropped.
 		CD_FIFO_FULL: out std_logic
 	);
 end pce_top;

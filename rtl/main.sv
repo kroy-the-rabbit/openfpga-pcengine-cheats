@@ -156,7 +156,7 @@ module pce (
     output wire        cd_data_end_out,
 
     // Diagnostic only, straight out of the CD unit. cd.vhd carries the layout.
-    output wire [31:0] cd_dbg_out,
+    output wire [47:0] cd_dbg_out,
 
     // SCSI data FIFO full, for the drive model's flow control.
     output wire        cd_fifo_full_out,

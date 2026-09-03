@@ -45,8 +45,8 @@ entity cd is
 		
 		DM				: in std_logic;
 
-		-- The SCSI data FIFO has room. The drive model needs this to keep a
-		-- multi sector read in one continuous data in phase.
+		-- The SCSI data FIFO is full. The drive model stalls its push on this;
+		-- SCSI.vhd drops a byte written to a full FIFO without saying so.
 		CD_FIFO_FULL: out std_logic;
 		
 		CD_SL			: out signed(15 downto 0);
@@ -54,17 +54,16 @@ entity cd is
 		AD_S			: out signed(15 downto 0);
 
 		-- Diagnostic only, added by this fork; nothing in the CD unit reads it.
-		-- The CPU stops issuing SCSI commands and never resumes, and only two
-		-- things do that: it is parked on an interrupt, or the SCSI bus never
-		-- returned to bus free so it cannot arbitrate. This carries both, so
-		-- one run tells them apart. See docs/CD-PLAN.md 5l.
-		--   31..16 ADPCM_LEN
-		--      15  IRQ_N        14 CD_DTR_EN      13 CD_DTR
-		--      12  CD_DTD_EN    11 CD_DTD
-		--      10  ADPCM_END_EN  9 ADPCM_END       8 ADPCM_HALF_EN
-		--       7  ADPCM_HALF
-		--       6  BSY_N  5 REQ_N  4 MSG_N  3 CD_N  2 IO_N  1 SEL_N  0 ACK_N
-		CD_DBG		: out std_logic_vector(31 downto 0)
+		-- The two counters are the open question: does the ADPCM DMA take bytes
+		-- out of a data in phase that was not its own. See docs/CD-PLAN.md 5q.
+		--   47..32 DMA_BYTE_CNT     bytes the ADPCM DMA took off the bus
+		--   31..16 DMA_EN_BYTE_CNT  of those, the ones taken on DMA_EN alone
+		--   15..8  ADPCM_CTRL
+		--       7  ADPCM_PLAY    6 ADPCM_DMA_EN   5 ADPCM_DMA_RUN
+		--       4  DMA_WRITE_PEND
+		--       3  ADPCM_READ_PEND  2 ADPCM_WRITE_PEND
+		--       1  ADPCM_END        0 ADPCM_HALF
+		CD_DBG		: out std_logic_vector(47 downto 0)
 	);
 end cd;
 
@@ -134,6 +133,12 @@ architecture rtl of cd is
 	signal ADPCM_READ_PEND	: std_logic;
 	signal PLAY_READ_PEND	: std_logic;
 	signal DMA_WRITE_PEND	: std_logic;
+	-- Every byte the ADPCM DMA lifts off the SCSI bus, and the subset it lifted
+	-- with only DMA_EN set. DMA_RUN self clears after 2048 bytes; DMA_EN does
+	-- not, so a game that leaves it set takes bytes out of the next data in
+	-- phase whatever that phase was for. The second counter is that case alone.
+	signal DMA_BYTE_CNT		: unsigned(15 downto 0);
+	signal DMA_EN_BYTE_CNT	: unsigned(15 downto 0);
 	signal ADPCM_WRITE_NIB	: std_logic;
 	signal ADPCM_READ_NIB	: std_logic;
 	signal WRITE_PEND			: std_logic;
@@ -237,6 +242,8 @@ begin
 			ADPCM_CTRL <= (others => '0');
 			ADPCM_DMA_EN <= '0';
 			ADPCM_DMA_RUN <= '0';
+			DMA_BYTE_CNT <= (others => '0');
+			DMA_EN_BYTE_CNT <= (others => '0');
 			ADPCM_END <= '0';
 			ADPCM_HALF <= '0';
 			ADPCM_PLAY <= '0';
@@ -348,6 +355,10 @@ begin
 				if SCSI_REQ_N = '0' and SCSI_IO_N = '0' and SCSI_CD_N = '1' and SCSI_ACK_N = '1' then
 					ADPCM_WRDATA <= SCSI_DBO;
 					DMA_WRITE_PEND <= '1';
+					DMA_BYTE_CNT <= DMA_BYTE_CNT + 1;
+					if ADPCM_DMA_RUN = '0' then
+						DMA_EN_BYTE_CNT <= DMA_EN_BYTE_CNT + 1;
+					end if;
 				end if;
 			end if;
 			
@@ -574,12 +585,13 @@ begin
 	IRQ_N <= IRQ_N_INT;
 
 	-- The freeze is in ADPCM: a playing frame and a frozen one differ in one
-	-- bit, ADPCM_HALF, and everything else on screen is identical. ADPCM's DMA
-	-- takes its bytes off the SCSI bus and only advances during a data in
-	-- phase, and this drive model ends that phase between every sector where a
-	-- real one runs all 32 in a single phase. A DMA spanning that gap stalls
-	-- and the CPU spins on it, which is a hang with the sound looping.
-	CD_DBG <= ADPCM_LEN(15 downto 0) &
+	-- bit, ADPCM_HALF, and everything else on screen is identical. The open
+	-- question is whether the DMA is eating a data in phase that was not its
+	-- own, which would put game data in ADPCM RAM and starve the CPU of the
+	-- sector it asked for. Both counters answer it directly: the second one
+	-- moving during a plain READ6 is the whole of the case.
+	CD_DBG <= std_logic_vector(DMA_BYTE_CNT) &
+	          std_logic_vector(DMA_EN_BYTE_CNT) &
 	          ADPCM_CTRL &
 	          ADPCM_PLAY & ADPCM_DMA_EN & ADPCM_DMA_RUN & DMA_WRITE_PEND &
 	          ADPCM_READ_PEND & ADPCM_WRITE_PEND & ADPCM_END & ADPCM_HALF;

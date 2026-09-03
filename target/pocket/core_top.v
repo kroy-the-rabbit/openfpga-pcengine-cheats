@@ -1015,7 +1015,7 @@ module core_top (
   );
 
   // Straight from cd.vhd, for the diagnostic rows only. See cd.vhd's port.
-  wire [ 31:0] cd_dbg;
+  wire [ 47:0] cd_dbg;
   wire         cd_fifo_full;
 
   wire [935:0] cd_host_line;

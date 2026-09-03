@@ -1305,3 +1305,63 @@ Kept from the attempt, both real:
 * `SCSI.vhd` exports `FIFO_FULL` and `S_PUSHSEC` stalls on it. The push side had
   no flow control at all and `SCSI.vhd` drops a byte written to a full FIFO
   without saying so. Nothing outside could see the flag.
+
+## 5q. Count the bytes the DMA takes, since the phase cannot be held open
+
+5p closed the route that would have tested the ADPCM theory by construction. It
+does not need that route. The theory is that the ADPCM DMA takes bytes out of a
+data in phase that was not its own, and the DMA has a single point of intake:
+one branch in `cd.vhd` that latches `SCSI_DBO` when `ADPCM_DMA_EN` or
+`ADPCM_DMA_RUN` is set and the bus is in data in. Counting there answers it.
+
+Two counters, both 16 bit, both reset only by `RST_N`:
+
+* `DMA_BYTE_CNT`, every byte the DMA lifted off the bus.
+* `DMA_EN_BYTE_CNT`, the subset lifted with `ADPCM_DMA_RUN` clear.
+
+The split is the whole point. `DMA_RUN` clears itself at 2048 bytes, so bytes
+taken under it are a sector the game asked for and got. `DMA_EN` does not clear
+itself, so bytes taken under it alone are the DMA still holding its hand out
+after its sector arrived, and the next data in phase is whatever the game reads
+next. `W` climbing while `O` reads 08 is the answer; `W` at 0000 through a
+freeze retires the theory for good.
+
+`CD_DBG` widens to 48 bits to carry both without giving up `ADPCM_CTRL` and the
+flags, and row 3 becomes `U W K I R`. Off it come `M` (`ADPCM_LEN`), `N` (reads
+with a zero sector count) and `S` (the offset SAPSP resolved to), each having
+answered its question.
+
+## 5r. p18 retires the DMA theory and exposes the shared-bus race
+
+p18 on hardware, in the latest four PC Engine screenshots. `U` and `W` remain
+`0000` throughout. The last two diagnostic frames are byte-identical four
+seconds apart in the failed state, so this is not another transient read. The
+ADPCM DMA took no bytes at all in the captured failure and the theory in 5q is
+retired.
+
+The failure remains nondeterministic. One launch produced a black screen while
+the cinematic audio played. The captured launch produced a mismatched screen
+with appropriate audio looping. It ends with `F0176` and `R0176` again: every
+sector requested was delivered.
+
+There is a source-visible collision after the point every existing sector
+checksum observes. `cd_audio` asserts `aud_req` on odd `fstep` values and, at
+`fstep == 7`, clears `aud_busy` in that same clock. One clock later `cd_host`
+sees the registered tail `aud_req` with `aud_busy` already clear. If a SCSI
+push is on its strobe half then both happen:
+
+* the push state asserts `data_wr`, advances `sec_addr` and adds the intended
+  `sec_data` to the diagnostic checksum;
+* the assignment after the sequencer replaces shared `data` with `aud_data`
+  and asserts `audio_wr` from the same request.
+
+The SCSI FIFO therefore receives an audio byte in place of a sector byte. No
+byte is dropped, so the CPU count remains right. The checksum is computed from
+`sec_data` before the shared-bus override, so it remains right. Requested and
+delivered sector counts remain right. Whether the replacement lands depends
+on the relative audio and SCSI push phase, matching the run-to-run variation.
+
+p19 makes the audio hold condition `aud_busy || aud_req` for both response and
+sector pushes. Hardware counters record tail cycles that would previously have
+collided and any remaining `data_wr && audio_wr` overlap. The latter must stay
+zero; the former moving proves the fixed case was exercised.
