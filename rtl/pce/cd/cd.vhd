@@ -44,6 +44,10 @@ entity cd is
 		CD_DATA_END	: out std_logic;
 		
 		DM				: in std_logic;
+
+		-- The SCSI data FIFO has room. The drive model needs this to keep a
+		-- multi sector read in one continuous data in phase.
+		CD_FIFO_FULL: out std_logic;
 		
 		CD_SL			: out signed(15 downto 0);
 		CD_SR			: out signed(15 downto 0);
@@ -617,6 +621,7 @@ begin
 		CD_DATA		=> CD_DATA,
 		CD_WR			=> CD_DATA_WR,
 		CD_DATA_END	=> CD_DATA_END,
+		FIFO_FULL	=> CD_FIFO_FULL,
 
 		-- SCSI.vhd has always counted the bytes it actually handed the CPU in
 		-- a data in phase and nothing has ever read the counter. It is the one

@@ -37,7 +37,12 @@ entity SCSI is
 		CD_DATA_END	: out std_logic;
 		STOP_CD_SND	: out std_logic;
 		
-		DBG_DATAIN_CNT: out unsigned(15 downto 0)
+		DBG_DATAIN_CNT: out unsigned(15 downto 0);
+
+		-- The write side of the data FIFO. Nothing outside could see this, so
+		-- the drive model pushed a whole sector blind and the data in phase
+		-- ended whenever the FIFO happened to run dry between sectors.
+		FIFO_FULL	: out std_logic
 	);
 end SCSI;
 
@@ -373,5 +378,6 @@ begin
 	DOUT_SEND <= DATA_OUT;
 	
 	DBG_DATAIN_CNT <= DATAIN_CNT;
+	FIFO_FULL <= FULL;
 
 end rtl;

@@ -1016,6 +1016,7 @@ module core_top (
 
   // Straight from cd.vhd, for the diagnostic rows only. See cd.vhd's port.
   wire [ 31:0] cd_dbg;
+  wire         cd_fifo_full;
 
   wire [935:0] cd_host_line;
 
@@ -1076,6 +1077,8 @@ module core_top (
       .aud_req    (cd_aud_req),
       .aud_busy   (cd_aud_busy),
       .aud_dm     (cd_aud_dm),
+
+      .fifo_full(cd_fifo_full),
 
       .dbg_cd(cd_dbg),
 
@@ -1590,6 +1593,7 @@ module core_top (
       .cd_dout_send_out(cd_dout_send),
       .cd_data_end_out (cd_data_end),
       .cd_dbg_out      (cd_dbg),
+      .cd_fifo_full_out(cd_fifo_full),
       .cd_reset_out    (cd_reset_lvl)
   );
 

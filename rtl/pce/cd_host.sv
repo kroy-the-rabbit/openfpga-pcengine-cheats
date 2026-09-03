@@ -117,6 +117,11 @@ module cd_host (
     input  wire        aud_dm,
 
     // Diagnostic block for the overlay: four rows of 26 characters, row 0 in
+    // The SCSI data FIFO has no room. Until this existed the push side had no
+    // flow control at all: a whole sector went in blind, and the data in phase
+    // ended whenever the FIFO ran dry between one sector and the next.
+    input  wire        fifo_full,
+
     // Straight from cd.vhd, same clock, so no crossing. Its port carries the
     // bit layout; only the low half is on screen, the high half is ADPCM_LEN.
     input  wire [31:0] dbg_cd,
@@ -850,7 +855,16 @@ module cd_host (
             // stale byte first and shifted the whole sector down by one,
             // which loses byte 2047 and corrupts every sector silently.
             sec_addr  <= 11'd0;
-          end else if (fetch_done) begin
+            // `fetch_req` qualifies it. cd_fetch is a four phase handshake:
+            // `done` is held until `req` drops and then clears through two
+            // three deep synchronisers across the 74 and 43 MHz boundary,
+            // about 140 ns. While the walk to the next sector went by way of
+            // S_WAITEND that took milliseconds and the staleness never showed.
+            // Chaining sectors to keep the data in phase open re-enters this
+            // state about 93 ns later, and an unqualified `done` then completes
+            // a fetch that was never issued: a stale buffer pushed as a sector
+            // and `fetch_count` running ahead of what was asked for.
+          end else if (fetch_req && fetch_done) begin
             fetch_req   <= 1'b0;
             fetch_count <= fetch_count + 16'd1;
             push_i      <= 12'd0;
@@ -880,8 +894,11 @@ module cd_host (
 
         // -------------------------------------------- push a full sector --
         S_PUSHSEC: begin
-          if (aud_busy) begin
-            // stand off; the audio frame owns the byte bus
+          if (aud_busy || fifo_full) begin
+            // Stand off: either the audio frame owns the byte bus, or the FIFO
+            // is full and the next byte would be dropped. SCSI.vhd guards its
+            // own write with the same flag, so without this the byte is lost
+            // silently rather than delayed.
           end else if (!push_ph) begin
             data     <= sec_data;
             data_wr  <= 1'b1;
@@ -896,18 +913,37 @@ module cd_host (
             sec_addr <= sec_addr + 11'd1;
           end else begin
             push_ph <= 1'b0;
-            if (push_i == 12'd2047) state <= S_WAITEND;
-            else push_i <= push_i + 12'd1;
+            if (push_i == 12'd2047) begin
+              // One data in phase per sector, deliberately. Chaining sectors
+              // to keep a single phase open across a whole READ6, the way a
+              // real drive answers one, stopped the core booting: `CD_DTR` in
+              // cd.vhd is how the CPU learns a sector finished, and it drops
+              // for exactly one clock at byte 2048 before the arming branch
+              // above re-asserts it, because the phase conditions still hold.
+              // Across a phase break it stays low for milliseconds; inside a
+              // continuous phase the CPU cannot see it at all, and the System
+              // Card re-read the same sectors for ever. See docs/CD-PLAN.md 5p.
+              state <= S_WAITEND;
+            end else push_i <= push_i + 12'd1;
           end
         end
 
         // ---------------------------------------------- data phase ends ---
+        // Only the end of a command lands here now. The walk from one sector
+        // to the next moved into S_PUSHSEC, so that a multi sector read never
+        // lets the FIFO empty and never closes its data in phase early.
         S_WAITEND: begin
           if (data_end) begin
             if (op == OP_READ6) begin
               lba <= lba + 32'd1;
-              if (cnt == 9'd1) begin
-                cnt    <= 9'd0;
+              if (cnt != 9'd1) begin
+                cnt         <= cnt - 9'd1;
+                off_step    <= 2'd0;
+                off_mode    <= OFF_DATA;
+                scan_target <= lba + 32'd1;
+                state       <= S_OFFSET;
+              end else begin
+                cnt <= 9'd0;
                 // Back to what the drive was doing, which is playing if the
                 // music never stopped. Returning unconditionally to DS_IDLE
                 // meant the first data read of a stage load knocked the drive
@@ -916,12 +952,6 @@ module cd_host (
                 // instead of the music, for the rest of the track.
                 dstate <= ds_resume;
                 state  <= S_STATUS;
-              end else begin
-                cnt         <= cnt - 9'd1;
-                off_step    <= 2'd0;
-                off_mode    <= OFF_DATA;
-                scan_target <= lba + 32'd1;
-                state       <= S_OFFSET;
               end
             end else begin
               state <= S_STATUS;

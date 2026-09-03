@@ -1268,3 +1268,40 @@ proven by a single good run.
 `I8A13` at that instant has the bus in STATUS phase with REQ asserted and ACK
 not, where an earlier frame read `I827F`, bus free. Both are single instants
 and neither is yet evidence of anything.
+
+## 5p. The phase break between sectors is load bearing
+
+A real drive answers a 32 sector READ6 in one continuous data in phase. This
+model answers in 32, because `SCSI.vhd` ends the phase the moment its FIFO runs
+dry and the next sector takes 2.81 ms to arrive from the APF. That gap looked
+like the way the ADPCM DMA gets fed game data: it takes bytes from any data in
+phase while `ADPCM_DMA_EN` is set, and the game clears `DMA_EN` on its own
+schedule.
+
+Chaining the sectors to hold one phase open **stopped the core booting**, twice.
+
+The first attempt over-fetched: `F` ran ahead of `R`, 2303 sectors delivered
+against 2195 asked for. `cd_fetch` is a four phase handshake and `S_FETCH`
+completed on a bare `fetch_done` without checking it had asked. `done` clears
+only after `req` drops, through two three deep synchronisers across the 74 and
+43 MHz boundary, about 140 ns; re-entering the state 93 ns later consumed the
+previous sector's completion. That was a latent hazard the old millisecond wait
+in `S_WAITEND` made unreachable, and qualifying it with `fetch_req` is kept.
+
+The second attempt got the counts right and still would not boot: the System
+Card re-read the same few sectors for ever, `L` walking 0F7E to 0F7C while `C`
+and `F` climbed. `CD_DTR` in `cd.vhd` is how the CPU learns a sector finished,
+and at byte 2048 it drops for exactly one clock before the arming branch
+re-asserts it, because the phase conditions still hold. Across a phase break it
+stays low for milliseconds. Inside a continuous phase the CPU cannot see it.
+
+So the per-sector phase break is not an artifact, it is how sector completion is
+signalled here, and the chaining is reverted. **The ADPCM theory is untested,
+not disproven**: this was the route to testing it and the route is closed.
+
+Kept from the attempt, both real:
+
+* `S_FETCH` completes only on `fetch_req && fetch_done`.
+* `SCSI.vhd` exports `FIFO_FULL` and `S_PUSHSEC` stalls on it. The push side had
+  no flow control at all and `SCSI.vhd` drops a byte written to a full FIFO
+  without saying so. Nothing outside could see the flag.

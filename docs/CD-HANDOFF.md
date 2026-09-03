@@ -1,110 +1,98 @@
-# CD handoff, 2026-09-02
+# CD handoff, 2026-09-03
 
-Read this first, then `docs/CD-PLAN.md` for the phase plan.
+Read this first, then `docs/CD-PLAN.md` for the phase plan and 5k to 5p for
+this session.
 
 ## Where it stands
 
-**Rondo boots and the opening cinematic plays with its music.** Cue plus bin,
-on hardware, with no host processor. Data path, cue parser, drive model,
-sector fetch, CD-DA and ADPCM all run.
+**Rondo boots, plays, and reaches a stage.** Cue plus bin, on hardware, no host
+processor. It renders real gameplay: Richter, the carriage, Death, the fire.
 
-It does not get further. At the menu one sound plays, cuts off and stops.
-Starting the game creates a save and then hangs on a black screen.
+It does not survive play. The failure varies run to run and is not
+deterministic:
 
-`docs/CD-PLAN.md` 5k has the analysis. In short: a data read was knocking the
-drive out of `DS_PLAY`, so `READSUBQ` reported the wrong status and the wrong
-position for the whole of every track that had a read in it, and the end of a
-region was never consumed. That is fixed. Why the menu sound cuts off is not
-settled and the overlay is back on to settle it.
+* black screen with a sound effect looping, usually the galloping horse
+* the menu booting into a malformed death screen
+* a hard freeze with random sound effects
 
 | | |
 |---|---|
 | branch | `cd-streaming` |
-| last flashed | p6c, sisko, 10 m 31 s, setup 1.266 ns, hold 0.066 ns, 13,181 ALMs |
-| worktree | `worktrees/p5` on `cd-adpcm`, started then stopped, nothing committed |
+| on the card | p17, verified `7ac2cfa8` |
+| build | `FITTER_EFFORT="STANDARD FIT"`, seven for seven on timing |
+| worktree | `worktrees/p5` on `cd-adpcm`, nothing committed |
 
-## What to do with the next run
+## Fixed today
 
-`CD_DIAG` is 1, so the six rows draw over a loaded cue with **Show cheats**
-on. `CD_PROBE` stays 0: the rows come from `cd_host` over `cd_enable` and need
-neither probe module nor a menu entry. The two used to be one switch.
+* **PREGAP belongs in the LBA, not the byte offset.** `cd_toc` used one number
+  for both. Pregap sectors are absent from the bin, so `base` is right to skip
+  them, and the disc numbers them, so `lba` must not. Every track was reported
+  225 sectors early from track 2 and 375 from track 3. Verified on hardware,
+  three commands, three exact hits. Commit `a324173`.
+* **A data read no longer knocks the drive out of `DS_PLAY`.** Commit `d5c7de4`.
+* **`S_FETCH` completes only on `fetch_req && fetch_done`.** `cd_fetch` is a
+  four phase handshake and `done` outlives the request by about 140 ns.
+* **`SCSI.vhd` exports `FIFO_FULL` and the push side stalls on it.** There was
+  no flow control at all and a byte written to a full FIFO is dropped silently.
+* **A diagnostic overlay that survives a screenshot**, `CD_DIAG_SCALE = 2`.
+  Commit `eb6b2a8`.
 
-Note the margin: P7b meets hold by 8 ps, and P7a missed by 17 ps with 41
-fewer ALMs. Hold in that domain is placement noise at 80% occupancy, so treat
-a debug build's timing as luck rather than headroom, and check `report.sh`
-every time. Setup is not close in either: 1.760 and 1.865 ns. Two readings decide everything:
+## Established, so nobody chases it again
 
-* **`Z` on row 4, at the moment the menu sound cuts off.** If it steps, the
-  region reached the end offset row 5 shows, and the question is whether that
-  offset is right or whether the track was meant to repeat. If it does not
-  step, a command stopped the audio, and `Q` and `R` on the same row say which
-  one and with what mode byte. `Q` is SAPSP's byte 1, `R` is SAPEP's.
-* **`Y` on row 2 against `F` on row 0, at the black screen.** `Y` running
-  while `F` stands still is a game polling the drive for an answer it never
-  gets. Both frozen means the core stopped asking. `F` still climbing means
-  data is flowing and the hang is somewhere else.
+Every one of these was measured on hardware, not reasoned about:
 
-`SAPEP` still writes `aud_play` and `dstate` from its mode byte, which its own
-comment says it should not. Left alone deliberately, so that this run measures
-the current behaviour rather than a changed one.
+* Sectors arrive **byte perfect** at the **right offsets**. `G0651` is the 16
+  bit sum of the 2048 bytes at 0x00980830 computed independently from the bin.
+* **Every sector asked for is delivered.** `R` equals `F`.
+* **The CPU takes all 65536 bytes** of a 32 sector read. `D0000`.
+* **No interrupt is ever armed** and **the bus is never stuck**. A frame of the
+  game running healthy shows the same SCSI phase as a frozen one.
+* **ADPCM is idle in both failure modes** as of P13: `CTRL 00`, only
+  `ADPCM_END` set, no `PLAY`, no `DMA_EN`, no `DMA_RUN`.
+* `F0176` is **not** a stall. 374 sectors is simply what Rondo reads, and it
+  reads the same number in runs that reach a menu.
+* Timing failures are **not ours**. The violating path is inherited,
+  `HUC6270:VDC0 | SPR_LINE_D` into the sprite line buffer, skew 0.413 against
+  delay 0.401. `STANDARD FIT` fixes it; seeds are a lottery.
 
-## What is left after that
+## What is open
 
-**The cheats have never been tried on a CD game.** That is what the whole
-project was for. `Castlevania - Rondo of Blood.cht` is on the card in
-`Assets/pce/common/`, five titles and six pokes, all pointing into the 8KB
-work RAM the poker already writes. Nothing has confirmed it runs.
+1. **The freeze during play.** Nothing above explains it.
+2. **Random sound effects.** The theory is that the ADPCM DMA takes bytes from
+   a data in phase it was not meant to see: it consumes from any phase while
+   `ADPCM_DMA_EN` is set and the game clears `DMA_EN` on its own schedule. That
+   would put game data in ADPCM RAM, played as samples, and starve the CPU.
+   **Untested, not disproven.**
+3. Two of three SAPSP address forms are still unexercised.
+4. Eight audio reads fail at startup with result 2, unexplained.
+5. **The cheats have never been run against a CD game.** The whole point of the
+   fork. `Castlevania - Rondo of Blood.cht` is on the card, five titles.
 
-Then, none of it blocking play:
+## Do this next
 
-* **Two of the three SAPSP address forms are unexercised.** Rondo only ever
-  uses MSF, byte 9 = 0x40. The LBA and track-number forms are written from the
-  reference and have never run. Needs a game that uses them.
-* **Eight audio reads fail at startup with result 2.** The count stopped moving
-  after startup, so they are not in the steady state, but nothing explains them
-  and what APF result 2 means is not documented anywhere in this tree.
-* **A multi-sector READ6 that crosses a track boundary** keeps the track it
-  started in. Rondo's data is one track so it has never mattered.
+**Count the bytes the ADPCM DMA consumes.** `DMA_WRITE_PEND` assertions in
+`cd.vhd`, on the overlay beside `DATAIN_CNT`. If that counter moves during a
+plain READ6, item 2 is the answer. It is a small instrumentation build and it
+settles the question without the architectural change that failed twice.
 
-## The overlay, when it is turned back on
-
-`CD_DIAG = 0` compiles the rows out; `CD_PROBE` is separate and gates only the
-two probe modules. With `CD_DIAG = 1` and **Show cheats** on it reads:
-
-    T22 C001C OD9 S0 D3 F00C9
-    H 08 08 08 08 D8 D9 E0
-    L00000F5D A008BE830 Y0142
-    A0648 E0008 K2 W8R8 U0 N0
-    Q 02 40 R 00 40 P1 Z0003
-    S01CE2580 X02EC6E30
-
-Row 2 gained `Y`, READSUBQ commands answered. Row 4 lost the two throughput
-fields, which had done their job, and gained SAPEP's mode bytes as `R` and the
-end-of-region count as `Z`. `cd_host.sv` carries the full legend.
-
-Reads over playback seconds is the chunk rate and should be 86: 1608 over 18
-is 89. Busy milliseconds over reads is what one read costs: 4516 over 1608 is
-2.81 ms, which is what the probe measures standalone. `E` has not moved from 8
-since startup, so failures are not in the steady state.
+Do **not** try to hold one data in phase open across a multi sector read. It
+was tried twice and 5p records why: `CD_DTR` is how the CPU learns a sector
+finished, and inside a continuous phase it is low for one clock instead of
+milliseconds. The per sector phase break is load bearing.
 
 ## Things that will bite
 
-* **`err` is sticky, `F`/`W` are counters.** Do not read a sticky field as a
-  rate. This already cost one round trip.
-* **`last_lba` and `last_off` now latch together per sector.** Before P4c they
-  did not, and a 32 sector READ6 reported two different points and looked like
-  an offset bug. It was not.
-* **`E5E5E5E5` in the sector head is real disc content**, not a failed read.
-  Verified against the bin.
-* **Quartus exits 0 on a design that misses timing.** `tools/podman/report.sh`
-  is the gate. The flash script in this session checked `timing met` before
-  writing to the card and should stay that way.
-* **Do not read elapsed time from a sense of how long a build took.** Read
-  `build/<name>/elapsed`.
-* **Byte 0 of the file is bits [31:24] of a bridge word, not [7:0].** The
-  bridge writes big-endian because `core_top` ties `bridge_endian_little` low.
-  `cd_fetch` gets this right; `cd_audio` had it backwards for four builds and
-  the header asserted it was right, which is what kept it invisible. File order
-  is not low bits first.
-* **A rate needs both of its units checked.** One build was spent on a counter
-  of seconds since reset read as though it were seconds of playback.
+* **A single overlay frame is worth nothing.** Three times this session a
+  transient was read as a fault: the SAPSP/SAPEP ordering, the title screen
+  `P1`, and five seconds with no commands that was the cinematic loading
+  normally. Capture a healthy frame and a broken one and diff them. That is
+  what found ADPCM, and it is what proved the SCSI phase was innocent.
+* **Do not narrate timing slack.** `report.sh` prints per clock worst slack and
+  nothing else; there is no path in it. It is a pass or fail gate.
+* **`cd.vhd` and `SCSI.vhd` are inherited and CRLF.** Write them in binary mode
+  or the diff becomes the whole file.
+* **`err` is sticky, `F` `W` `R` are counters.** Never read a sticky field as a
+  rate.
+* **Byte 0 of the file is bits [31:24] of a bridge word.**
+* **Quartus exits 0 on a design that misses timing.** `report.sh` is the gate.
+* **Read `build/<name>/elapsed`** rather than estimating how long anything took.
