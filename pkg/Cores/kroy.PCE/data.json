@@ -3,7 +3,7 @@
     "magic": "APF_VER_1",
     "data_slots": [
       {
-        "name": "Cartridge or System Card",
+        "name": "Cartridge",
         "id": 0,
         "required": true,
         "filename": "bios_3_0_usa.pce",
@@ -33,6 +33,17 @@
         "size_maximum": "0x4000"
       },
       {
+        "name": "Disc (cue)",
+        "id": 100,
+        "required": false,
+        "parameters": "0x00000009",
+        "extensions": [
+          "cue"
+        ],
+        "address": "0x30000000",
+        "size_maximum": "0x10000"
+      },
+      {
         "name": "Cheats",
         "id": 2,
         "required": false,
@@ -43,17 +54,6 @@
         ],
         "address": "0x50000000",
         "size_maximum": "0x100000"
-      },
-      {
-        "name": "Disc (cue)",
-        "id": 100,
-        "required": false,
-        "parameters": "0x00000009",
-        "extensions": [
-          "cue"
-        ],
-        "address": "0x30000000",
-        "size_maximum": "0x10000"
       },
       {
         "name": "Disc data",

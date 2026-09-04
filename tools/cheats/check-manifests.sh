@@ -74,9 +74,10 @@ dupe=$(jq -r '[.data.data_slots[].id] | group_by(.) | map(select(length>1)) | fl
 # APF clones a nonvolatile filename only from the first manifest entry. Keep
 # the HuCard in that primary position and its automatic Save immediately after
 # it. CD mode explicitly rebinds Save from the later cue path in RTL. The save
-# size datatable address in core_top.v is coupled to this array index.
-primary_save_order=$(jq -r '[.data.data_slots[0:2][].id] | join(",")' "$C/data.json")
-[ "$primary_save_order" = "0,1" ] || bad "first data slots must be primary media 0 and Save 1"
+# size datatable address in core_top.v is coupled to this array index. Save is
+# hidden in the menu, so 0,1,100,2 presents Cartridge, Disc, then Cheats.
+primary_menu_order=$(jq -r '[.data.data_slots[0:4][].id] | join(",")' "$C/data.json")
+[ "$primary_menu_order" = "0,1,100,2" ] || bad "first data slots must be 0,1,100,2 for Cartridge, Save, Disc, Cheats"
 if ! rg -q 'datatable_addr <= 1 \* 2 \+ 1;' "$ROOT/target/pocket/core_top.v"; then
   bad "core_top.v must publish the save size at data slot index 1"
 fi

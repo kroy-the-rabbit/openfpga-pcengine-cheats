@@ -1503,16 +1503,16 @@ The locally packaged `pce.rev` MD5 is
 `37589416822862010413a4af78ab318a`; packaged `data.json` SHA256 is
 `238bd3495b79c60345262382558a4541503080d6495ecdc546925194d81d9f19`.
 
-Hardware must answer the remaining question: whether APF flushes later writes
-to the file rebound through `0x0192`. The test sequence is:
+Hardware answers the writeback question: pass. The installed p21 package
+matched the build hashes. A fresh launch created
+`Saves/pce/common/Castlevania - Rondo of Blood.sav` at 2048 bytes while root
+`Saves/.sav` remained absent. Its first captured SHA256 was
+`2de0d66eee36dade46201567821d98ae5fa5885893e2d16fd0bda899307b422f`.
+After the user completed stage 0, exited, and relaunched, Rondo loaded the
+record at 4 percent. The post-stage-0 file SHA256 was
+`8128add46b7934a761df2f76fd200540d72e31805d96ffed12e40c919318bb3a`.
+Both card states were copied and byte-verified locally. Runtime binding now has
+positive hardware evidence for create, writeback, and reload.
 
-1. Verify root `Saves/.sav` is absent and preserve the p20 backup.
-2. Install and hash-verify the p21 package.
-3. Launch Rondo and require a cue-named 2048-byte save plus `S10`, with no root
-   save created.
-4. Create distinctive progress and quit normally. Copy and hash the save to
-   ignored local evidence before any analysis or cleanup.
-5. Relaunch and prove the same record loads. A created file without this reload
-   is not a persistence pass.
-6. Run a HuCard with an established save to prove restored manifest ordering
-   preserves automatic HuCard save naming.
+One save gate remains: run a HuCard with an established save to prove the
+restored manifest ordering preserves automatic HuCard save naming and loading.

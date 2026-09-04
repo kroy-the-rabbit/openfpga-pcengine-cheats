@@ -12,17 +12,18 @@ was exercised. Repeatability across cold launches is not established yet.
 | | |
 |---|---|
 | branch | `cd-streaming`, p21 functional source `b86a38b` on p19 and p20 `ec08dd7` |
-| working tree | p21 build artifacts and evidence are ignored under `build/` |
-| on the card | p20, `pce.rev` MD5 `ac08484a444b6bae18520f65f0ae8a00` |
+| working tree | p21 build artifacts and hardware evidence are ignored under `build/` |
+| on the card | p21, `pce.rev` MD5 `37589416822862010413a4af78ab318a` |
 | build | p21 on sisko LXC 150, `STANDARD FIT`, setup `+2.408 ns`, hold `+0.072 ns` |
-| card save | wrong fresh `.sav` removed; old save preserved as `.sav.p20-pre-fresh-test` |
+| card save | cue-named Rondo save reloads at 4 percent; root `.sav` remains absent |
 | card state | mounted at `/run/media/kroy/pocket`; resolve by mount point, never `/dev/sdX` |
 | worktree | `worktrees/p5` on `cd-adpcm`, nothing committed |
 
 p19 and p20 screenshots plus the candidate CD saves are copied off the
-removable card under ignored `build/evidence/`. p20 is built, timing-clean,
-packaged, installed, hash-verified and tested once on hardware. Its four
-screenshots were verified locally and then removed from the card as requested.
+removable card under ignored `build/evidence/`. p21 is built, timing-clean,
+packaged, installed, hash-verified, and proven to create and reload a
+cue-derived save. Its pre-write and post-stage-0 save states are byte-verified
+locally under `build/evidence/p21/`.
 
 ## What p19 found
 
@@ -109,16 +110,14 @@ All measured on hardware:
 
 ## Still open
 
-1. Install p21 and prove the runtime-bound cue save is created, flushed, and
-   loaded on relaunch. Root `Saves/.sav` must remain absent.
-2. HuCard save naming after restoring the manifest to `0, 1, 2, 100, 101`.
-3. Repeat CD stage play enough to assess the former random or looping sound
+1. HuCard save naming after restoring the manifest to `0, 1, 2, 100, 101`.
+2. Repeat CD stage play enough to assess the former random or looping sound
    effects after the data-bus fix.
-4. Two of three SAPSP address forms remain unexercised.
-5. Eight audio reads fail at startup with APF result 2, unexplained.
-6. **Cheats have never been run against a CD game.** The point of the fork.
+3. Two of three SAPSP address forms remain unexercised.
+4. Eight audio reads fail at startup with APF result 2, unexplained.
+5. **Cheats have never been run against a CD game.** The point of the fork.
    `Castlevania - Rondo of Blood.cht` is on the card, five titles, six pokes.
-7. Whether `STANDARD FIT` should be the project default rather than an env var.
+6. Whether `STANDARD FIT` should be the project default rather than an env var.
 
 ## p20 hardware result and next work
 
@@ -166,7 +165,7 @@ therefore keeps the proven combined launch flow and uses target command
 `0x0192` to bind save slot 1 explicitly to a path derived from the selected
 cue, followed by `0x0180` to load that file before releasing CD reset.
 
-## p21 build and next hardware test
+## p21 hardware result and next work
 
 p21 implements that explicit binding in functional commit `b86a38b`. The
 manifest is back to `0, 1, 2, 100, 101`, preserving the HuCard automatic save
@@ -184,41 +183,39 @@ SHA256 is
 Local packaging produced `pce.rev` MD5
 `37589416822862010413a4af78ab318a`; packaged `data.json` SHA256 is
 `238bd3495b79c60345262382558a4541503080d6495ecdc546925194d81d9f19`.
-The candidate is under ignored `build/p21/`. It is not on the card yet.
+The candidate is under ignored `build/p21/` and those hashes were verified on
+the card after installation.
 
-The next test is filename and persistence first:
+The save test passes. The fresh launch created the 2048-byte file
+`Saves/pce/common/Castlevania - Rondo of Blood.sav`; root `Saves/.sav` remained
+absent. A live copy during the opening sequence had SHA256
+`2de0d66eee36dade46201567821d98ae5fa5885893e2d16fd0bda899307b422f`.
+The user completed stage 0, exited, and relaunched. Rondo loaded the record at
+4 percent, its completed-stage-0 state. The file had changed to SHA256
+`8128add46b7934a761df2f76fd200540d72e31805d96ffed12e40c919318bb3a`.
+Both states were copied from the card and byte-verified locally. This proves
+cue-derived naming, writeback through the rebound slot, and load on relaunch.
 
-1. Confirm the card still has no root `Saves/.sav`, preserve the old p20 backup,
-   and record the save directory hashes before launch.
-2. Merge `build/p21/dist/` onto the mounted card, never with `--delete`, then
-   verify the deployed bitstream and manifest against the hashes above.
-3. Launch Rondo. A fresh binding should end the path diagnostic with `S10`:
-   save create returned 1, then the 2048-byte read returned 0.
-4. Confirm `Saves/pce/common/Castlevania - Rondo of Blood.sav` exists at 2048
-   bytes and root `Saves/.sav` remains absent.
-5. Create distinctive progress, quit normally, copy and hash the save locally,
-   then relaunch and prove the same record loads. This is the writeback test;
-   successful `0x0192` and `0x0180` alone do not prove APF flushes to the
-   rebound path.
-6. Launch a HuCard with an established save and confirm automatic naming and
-   load behavior did not regress.
+The remaining save test is a HuCard with an established record. It must still
+use its game-derived automatic name and load correctly with the restored
+manifest order.
 
 Copy every screenshot and save result to ignored local evidence and verify its
 hash before removing any exact captured file from the card.
 
 ## Release alignment
 
-The card still carries p20 from functional source `ec08dd7`. The next hardware
-candidate is p21, built from exact detached commit `b86a38b`; its local package
-contains the byte-reversed form of the fetched timing-clean RBF. Neither is the
-final release artifact. Documentation follows the functional commit, and more
-hardware-driven source changes may still be required.
+The card carries p21, built from exact detached functional commit `b86a38b`.
+Its installed bitstream and manifest are byte-identical to the timing-clean
+local package, and that artifact passed the CD save create, write, and reload
+test. It is still a hardware candidate rather than the final release artifact.
+Documentation follows the functional commit, and more hardware-driven source
+changes may still be required.
 
 Before tagging or packaging a release:
 
-1. Complete the p21 save create, flush, and reload test, then the HuCard save
-   regression and CD cheat test. Record every result here and in
-   `docs/CD-PLAN.md`.
+1. Complete the HuCard save regression and CD cheat test. Record every result
+   here and in `docs/CD-PLAN.md`.
 2. Decide which diagnostics remain. The cycling CD overlay was built for
    troubleshooting and the plan says not to ship it as normal presentation.
 3. Commit all release source and documentation. Build that commit on a verified
@@ -288,5 +285,6 @@ not remount the card and do not unmount it unless told.
 p21 was built from a Git bundle in the detached sisko checkout
 `/root/pocket-pcengine-p21-20260903`. Its results were fetched through the
 shared interface into `build/p21/`, then packaged locally with
-`make dist BUILD_NAME=p21`. Use the p21 hashes in the dedicated section above,
-not the p20 values in this historical paragraph.
+`make dist BUILD_NAME=p21`. The package was merged onto the card and both
+`pce.rev` and `data.json` matched the p21 hashes in the dedicated section
+above. Do not use the p20 values in the historical paragraph.
