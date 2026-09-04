@@ -485,7 +485,7 @@ module core_top (
   // domain is placement noise and both builds sit inside it. Setup was 1.865
   // and 1.760 ns, never close. A debug build is what this margin buys, and
   // the release build is the one with CD_DIAG back at 0.
-  localparam CD_DIAG = 1;
+  localparam CD_DIAG = 0;
 
   // Draw the diagnostic block at double size: each 26 character row becomes
   // two display rows of 13, in 12 pixel cells. The Pocket's screenshots are
@@ -493,7 +493,7 @@ module core_top (
   // went on misreading 10C1 for 10E1 and 7 for 8, each one a build and a
   // hardware run. It costs the cheat list every line, so it is a
   // troubleshooting mode and never ships. See docs/CD-PLAN.md 5n.
-  localparam CD_DIAG_SCALE = 2;
+  localparam CD_DIAG_SCALE = 1;
 
   wire         probe_req, path_req;
   wire [ 15:0] probe_cmd, path_cmd;

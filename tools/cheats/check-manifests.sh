@@ -82,6 +82,16 @@ if ! rg -q 'datatable_addr <= 1 \* 2 \+ 1;' "$ROOT/target/pocket/core_top.v"; th
   bad "core_top.v must publish the save size at data slot index 1"
 fi
 
+# Show cheats is release-facing UI. The CD diagnostic block replaces its
+# normal header and doubled diagnostics consume the entire cheat list, so both
+# troubleshooting settings must be disabled in every package candidate.
+if ! rg -q 'localparam CD_DIAG = 0;' "$ROOT/target/pocket/core_top.v"; then
+  bad "release core must disable the CD diagnostic overlay"
+fi
+if ! rg -q 'localparam CD_DIAG_SCALE = 1;' "$ROOT/target/pocket/core_top.v"; then
+  bad "release core must use normal Show cheats scale"
+fi
+
 # Two slots sharing the upper nibble means two data_loaders answering the same
 # bridge writes.
 dupe=$(jq -r '[.data.data_slots[].address | .[0:3]] | group_by(.) | map(select(length>1)) | flatten | unique | @csv' "$C/data.json")
