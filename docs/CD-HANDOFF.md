@@ -11,10 +11,10 @@ was exercised. Repeatability across cold launches is not established yet.
 
 | | |
 |---|---|
-| branch | `cd-streaming`, p19 and p20 committed as `ec08dd7` on p18 `46f9a34` |
-| working tree | completed p20 hardware-result handoff updates, uncommitted |
+| branch | `cd-streaming`, p21 functional source `b86a38b` on p19 and p20 `ec08dd7` |
+| working tree | p21 build artifacts and evidence are ignored under `build/` |
 | on the card | p20, `pce.rev` MD5 `ac08484a444b6bae18520f65f0ae8a00` |
-| build | kira LXC 151, `STANDARD FIT`, setup `+2.297 ns`, hold `+0.098 ns` |
+| build | p21 on sisko LXC 150, `STANDARD FIT`, setup `+2.408 ns`, hold `+0.072 ns` |
 | card save | wrong fresh `.sav` removed; old save preserved as `.sav.p20-pre-fresh-test` |
 | card state | mounted at `/run/media/kroy/pocket`; resolve by mount point, never `/dev/sdX` |
 | worktree | `worktrees/p5` on `cd-adpcm`, nothing committed |
@@ -109,18 +109,16 @@ All measured on hardware:
 
 ## Still open
 
-1. Implement a runtime save-slot rebind from the cue path. APF clones automatic
-   nonvolatile names only from the first manifest slot, so ordering alone
-   cannot preserve HuCard naming and name a later runtime cue.
-2. One more clean p20 launch to stage play with `U` moving and `W=0000`, also
-   confirming that the new save survived the accidental reset.
-3. HuCard save naming after the shared manifest reorder.
-4. Random or looping sound effects need repeatability after the data-bus fix.
-5. Two of three SAPSP address forms remain unexercised.
-6. Eight audio reads fail at startup with APF result 2, unexplained.
-7. **Cheats have never been run against a CD game.** The point of the fork.
+1. Install p21 and prove the runtime-bound cue save is created, flushed, and
+   loaded on relaunch. Root `Saves/.sav` must remain absent.
+2. HuCard save naming after restoring the manifest to `0, 1, 2, 100, 101`.
+3. Repeat CD stage play enough to assess the former random or looping sound
+   effects after the data-bus fix.
+4. Two of three SAPSP address forms remain unexercised.
+5. Eight audio reads fail at startup with APF result 2, unexplained.
+6. **Cheats have never been run against a CD game.** The point of the fork.
    `Castlevania - Rondo of Blood.cht` is on the card, five titles, six pokes.
-8. Whether `STANDARD FIT` should be the project default rather than an env var.
+7. Whether `STANDARD FIT` should be the project default rather than an env var.
 
 ## p20 hardware result and next work
 
@@ -168,18 +166,59 @@ therefore keeps the proven combined launch flow and uses target command
 `0x0192` to bind save slot 1 explicitly to a path derived from the selected
 cue, followed by `0x0180` to load that file before releasing CD reset.
 
+## p21 build and next hardware test
+
+p21 implements that explicit binding in functional commit `b86a38b`. The
+manifest is back to `0, 1, 2, 100, 101`, preserving the HuCard automatic save
+relationship. After a cue parses, `dataslot_path.sv` changes the selected
+`/Assets/.../name.cue` path to `/Saves/.../name.sav`, opens it into slot 1, and
+loads 2048 bytes through `0x0180`. A newly created zero-length file is reopened
+with resize, but an existing save is never opened with truncate. CD reset now
+remains asserted until both the bin and runtime-bound save are ready.
+
+The exact commit was built on sisko in a fresh detached checkout. The fit took
+831 seconds, used 15,021 of 18,480 ALMs, and passed every timing analysis.
+Worst setup slack is `+2.408 ns`; worst hold slack is `+0.072 ns`. The raw RBF
+SHA256 is
+`ccd397d2b80022ce9cba62859b7c43162f4a81e519ddf9fde3f9d7a1dff14992`.
+Local packaging produced `pce.rev` MD5
+`37589416822862010413a4af78ab318a`; packaged `data.json` SHA256 is
+`238bd3495b79c60345262382558a4541503080d6495ecdc546925194d81d9f19`.
+The candidate is under ignored `build/p21/`. It is not on the card yet.
+
+The next test is filename and persistence first:
+
+1. Confirm the card still has no root `Saves/.sav`, preserve the old p20 backup,
+   and record the save directory hashes before launch.
+2. Merge `build/p21/dist/` onto the mounted card, never with `--delete`, then
+   verify the deployed bitstream and manifest against the hashes above.
+3. Launch Rondo. A fresh binding should end the path diagnostic with `S10`:
+   save create returned 1, then the 2048-byte read returned 0.
+4. Confirm `Saves/pce/common/Castlevania - Rondo of Blood.sav` exists at 2048
+   bytes and root `Saves/.sav` remains absent.
+5. Create distinctive progress, quit normally, copy and hash the save locally,
+   then relaunch and prove the same record loads. This is the writeback test;
+   successful `0x0192` and `0x0180` alone do not prove APF flushes to the
+   rebound path.
+6. Launch a HuCard with an established save and confirm automatic naming and
+   load behavior did not regress.
+
+Copy every screenshot and save result to ignored local evidence and verify its
+hash before removing any exact captured file from the card.
+
 ## Release alignment
 
-The p20 card artifact was built from the exact p19 and p20 functional source
-now committed as `ec08dd7`. The report says `commit: nogit` because the runner
-received a tracked-file archive rather than a Git checkout, so it is a hardware
-test artifact, not the final release artifact.
+The card still carries p20 from functional source `ec08dd7`. The next hardware
+candidate is p21, built from exact detached commit `b86a38b`; its local package
+contains the byte-reversed form of the fetched timing-clean RBF. Neither is the
+final release artifact. Documentation follows the functional commit, and more
+hardware-driven source changes may still be required.
 
 Before tagging or packaging a release:
 
-1. Resolve the failed fresh CD save naming, then finish one repeat CD launch,
-   the HuCard save regression and the CD cheat test. Record every result here
-   and in `docs/CD-PLAN.md`.
+1. Complete the p21 save create, flush, and reload test, then the HuCard save
+   regression and CD cheat test. Record every result here and in
+   `docs/CD-PLAN.md`.
 2. Decide which diagnostics remain. The cycling CD overlay was built for
    troubleshooting and the plan says not to ship it as normal presentation.
 3. Commit all release source and documentation. Build that commit on a verified
@@ -218,7 +257,12 @@ Before tagging or packaging a release:
 
 ## Build and flash
 
-Builds run on a remote runner, never locally and never in CI. p20 used kira
+Builds run on a remote runner, never locally and never in CI. The private
+orchestrator now provides the restricted shared command
+`/home/kroy/Desktop/repos/pocket-dev/tools/runner-build`. It admits only known
+runner and repository profiles, refuses a runner with an existing Quartus
+process, and holds a per-runner lock for managed jobs. Use it for new starts,
+status, job inspection, and artifact fetches. p20 used kira
 LXC 151 directly at `root@10.50.1.245`; all six public SSH keys published by
 the `kroy-the-rabbit` GitHub account are installed there. `jq` and `ripgrep`
 were also installed, so the runner now completes the manifest checks and
@@ -240,3 +284,9 @@ Merge that directory onto the mounted card without `--delete`, run `sync`, and
 verify both `pce.rev` and `data.json` in place. The sandbox can misreport the
 card as read-only, so request elevation outside the sandbox for the copy. Do
 not remount the card and do not unmount it unless told.
+
+p21 was built from a Git bundle in the detached sisko checkout
+`/root/pocket-pcengine-p21-20260903`. Its results were fetched through the
+shared interface into `build/p21/`, then packaged locally with
+`make dist BUILD_NAME=p21`. Use the p21 hashes in the dedicated section above,
+not the p20 values in this historical paragraph.

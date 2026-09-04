@@ -1470,3 +1470,49 @@ the corresponding path under `Saves/pce/common/` in save slot 1. A following
 `0x0180` can load it through the existing save bridge before CD reset is
 released. HuCards keep their current automatic slot-0 naming because the
 rebind runs only after a cue is parsed.
+
+## 5t. p21 binds the save slot from the runtime cue path
+
+p21 implements the explicit route in functional commit `b86a38b`. Manifest
+order returns to `0, 1, 2, 100, 101`, so automatic nonvolatile naming remains
+adjacent to the primary HuCard slot. CD launch no longer depends on manifest
+ordering for its save.
+
+After the selected cue path is read and the bin is opened, `dataslot_path.sv`
+rewrites `/Assets/.../name.cue` as `/Saves/.../name.sav` in the path buffer. It
+opens that path into slot 1 with create but not resize. Result 1 identifies a
+new zero-length file, which is then reopened with resize-only flags and a size
+of 2048 bytes. Existing files never take the resize path. Finally, `0x0180`
+loads slot 1 into the existing save bridge window. `valid`, and therefore
+`bin_ready`, is withheld until that read succeeds. `core_top.v` keeps CD reset
+asserted while a cue is loaded but `bin_ready` is false, preventing the System
+Card from observing stale root-save contents during the rebind.
+
+The three trailing path diagnostics now begin with `S` and show the save open
+and read results. A fresh successful path is `S10`; an existing successful
+path is `S00`. Any other result keeps CD reset asserted and is a hard failure,
+not a partial launch.
+
+Built on sisko from an isolated detached checkout with Quartus Lite 25.1 and
+`STANDARD FIT`, 16 processors. The fit took 831 seconds and used 15,021 ALMs.
+Every analysis passed: worst setup `+2.408 ns`, hold `+0.072 ns`, recovery
+`+12.012 ns`, removal `+0.059 ns`, minimum pulse width `+0.831 ns`. The raw
+RBF SHA256 is
+`ccd397d2b80022ce9cba62859b7c43162f4a81e519ddf9fde3f9d7a1dff14992`.
+The locally packaged `pce.rev` MD5 is
+`37589416822862010413a4af78ab318a`; packaged `data.json` SHA256 is
+`238bd3495b79c60345262382558a4541503080d6495ecdc546925194d81d9f19`.
+
+Hardware must answer the remaining question: whether APF flushes later writes
+to the file rebound through `0x0192`. The test sequence is:
+
+1. Verify root `Saves/.sav` is absent and preserve the p20 backup.
+2. Install and hash-verify the p21 package.
+3. Launch Rondo and require a cue-named 2048-byte save plus `S10`, with no root
+   save created.
+4. Create distinctive progress and quit normally. Copy and hash the save to
+   ignored local evidence before any analysis or cleanup.
+5. Relaunch and prove the same record loads. A created file without this reload
+   is not a persistence pass.
+6. Run a HuCard with an established save to prove restored manifest ordering
+   preserves automatic HuCard save naming.
