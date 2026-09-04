@@ -14,11 +14,14 @@ the core menu.
 Differences from the upstream agg23 port:
 
   - Cheats.
-  - SuperGrafx is removed to make room for them. .sgx files still load, but
-    they render as plain PC Engine and will not look right.
+  - PC Engine CD support from cue plus bin, including CD audio and cue-named
+    backup RAM saves.
+  - SuperGrafx is removed to make room for cheats and CD. .sgx files still
+    load, but they render as plain PC Engine and will not look right.
   - "Swap ROM Bit Order" for US TurboChip dumps taken bit-reversed.
 
-Loads standard PC Engine and TurboGrafx ROMs from the SD card. CD-ROM is not
-supported and is not planned here; use Mazamars312's core for that.
+Loads standard PC Engine and TurboGrafx ROMs from the SD card. CD games use a
+single-bin cue plus its bin and require a System Card image in
+Assets/pce/common. CHD and bare ISO files are not supported.
 
 Report issues with this build to kroy, not to agg23 or vanfanel.

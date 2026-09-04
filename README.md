@@ -55,11 +55,12 @@ hardware, so `.sgx` is not offered rather than offered and broken. If you want
 SuperGrafx, run agg23's core: the two install side by side and this one does not
 replace it.
 
-## PC Engine CD is being built
+## PC Engine CD
 
-`docs/CD-PLAN.md` is the plan. **Castlevania: Rondo of Blood boots, and the
-opening plays with its music**, verified on hardware. Starting a stage still
-hangs; see P7 in the plan.
+**Castlevania: Rondo of Blood boots from cue plus bin, plays both opening
+cinematics with music, completes stage 0, starts stage 1, and reloads its
+cue-named save**, verified on hardware. `docs/CD-PLAN.md` records the build and
+hardware evidence behind that result.
 
 The CD RTL is inherited, `rtl/pce/cd/`: `cd.vhd`, `SCSI.vhd`, `SCSI_FIFO.vhd`,
 `CDDA_FIFO.vhd` and `MSM5205.vhd`. It is live now: `pce_top.vhd` passes
@@ -103,7 +104,8 @@ slot layout here, slot IDs included, was checked against theirs, and so was the
   the core's own sample clock uses. ADPCM needed nothing: its RAM and its DMA
   live inside `cd.vhd` and feed off the SCSI data phase.
 
-Still to build: the menu and slot work in P6, and the SCSI edge cases in P5.
+The hardware target is Rondo from a single-bin cue. Multi-bin sets and games
+that exercise the remaining SCSI edge cases are not yet compatibility claims.
 See `docs/CD-HANDOFF.md`.
 
 Discs must be **cue plus bin**. A bare `.iso` is the data track only, so a game
@@ -132,7 +134,7 @@ than `1.1`. **A Pocket on older firmware will not load this core.**
 | Controller turbo | **works**, upstream's |
 | Per-game memory cards | **works**, upstream's |
 | SuperGrafx | **off.** It paid for the cheat engine and it is paying for CD as well. See above |
-| PC Engine CD | **in progress.** Rondo boots and the opening plays with music. Starting a stage hangs. See above |
+| PC Engine CD | **works for the hardware target.** Rondo completes stage 0, starts stage 1, and reloads its cue-named save. See above |
 | Cartridges | not supported |
 | **Show cheats**, the on-screen list of enabled cheats | **works** |
 | A code store meter | not built. The store holds 32 codes, `MAX_CODES` in `cheat_poker.sv` and `cheat_loader.sv`, and the loader stops committing at it, but nothing shows how full it is |
