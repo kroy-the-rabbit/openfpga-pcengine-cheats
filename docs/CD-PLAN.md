@@ -1366,7 +1366,7 @@ sector pushes. Hardware counters record tail cycles that would previously have
 collided and any remaining `data_wr && audio_wr` overlap. The latter must stay
 zero; the former moving proves the fixed case was exercised.
 
-## 5s. p19 excludes the shared-bus race; p20 fixes CD save naming
+## 5s. p19 excludes the shared-bus race; p20 shows ordering is insufficient
 
 p19 reached normal stage play on hardware. Three diagnostic frames during the
 horse scene all show `U0158 W0000`: 344 registered audio tail requests held off
@@ -1384,18 +1384,17 @@ one was created, and the game played normally.
 The card identifies the save-selection fault. The prior CD run had created
 `Saves/pce/common/bios_3_0_jap.sav`; p19 created `Saves/.sav`. Both are 2048
 bytes and contain a Rondo backup-RAM record. APF was deriving the nonvolatile
-name before it encountered the selected cue, so a manually selected BIOS named
-one save and a default BIOS left the other name empty. This same data-slot
-ordering defect is the subject of Mazamars312/openfpga-pcengine-cd pull request
-63, whose tested correction puts the save after the cue and before the default
-BIOS.
+name from the primary manifest entry, so a manually selected BIOS named one
+save and a default BIOS left the other name empty. The official APF definition
+says the primary slot is the first entry in `data.json`. Mazamars312's CD-only
+manifest puts its required cue first, which this combined core cannot copy
+without making HuCard naming use an absent cue.
 
-This core also launches HuCards, so p20 uses the combined ordering `0, 100, 1`:
-Cartridge or System Card, cue, then Save. A HuCard remains the last selected
-medium when no cue is present; a cue replaces the default BIOS as the last
-selected medium for a CD launch. Save moves from manifest index 1 to index 2,
-so the size datatable write moves with it. The manifest check now enforces both
-facts.
+This core also launches HuCards, so p20 tried the combined ordering
+`0, 100, 1`: Cartridge or System Card, cue, then Save. That was based on the
+incorrect assumption that APF used the nearest selected media slot preceding
+Save. Save moved from manifest index 1 to index 2 and the size datatable write
+moved with it, but the later hardware test disproved the naming assumption.
 
 p20 hardware verification is filename-first, then gameplay:
 
@@ -1417,9 +1416,57 @@ timing analysis. Worst setup slack is `+2.297 ns`; worst hold slack is
 and deployed `data.json` SHA256 is
 `af25fd012cf074dc28614e190c4beb27685ebf51bbb8773de6c4346669f7c732`.
 
-The good p19 backup-RAM image remains preserved locally under ignored build
-evidence and remains on the card as root `Saves/.sav`. It was deliberately not
-copied into the expected cue-derived path, because doing that would hide
-whether p20 actually chooses the right filename. The first p20 launch can
-therefore report no Rondo record once. Create one, exit the core so APF flushes
-it, and make the filename check before judging persistence.
+The good p19 backup-RAM image was preserved locally under ignored build
+evidence and left on the card as root `Saves/.sav`. p20 loaded it despite the
+manifest reorder: the save screen showed the existing `BRO` record at 4
+percent, normal stage play followed, and APF updated that same file on exit.
+The before and after images differ at exactly one byte, offset `0xBB`, from
+`00` to `01`. Save loading and persistence therefore pass across a core
+replacement.
+
+No cue-named save was created in the first run. Because the existing root
+binding was reused, that run alone could not distinguish reuse from ineffective
+ordering. The later fresh test answers the question below.
+
+Four p20 screenshots were copied and hash-verified under ignored
+`build/evidence/p20/`, then removed from the card at the user's request. The
+final overlay shows `F0176 R0176 U0144 W0000`; every requested sector arrived,
+324 old collision opportunities were excluded, and no actual write overlap
+occurred. The intervening frame shows normal live stage gameplay.
+
+The final fresh-name test is complete. After verifying it against the local p20
+copy, root `Saves/.sav` was moved recoverably on the card to
+`Saves/.sav.p20-pre-fresh-test`. Its SHA256 remains
+`b0114f4883532e6c83f2d0e83bc532d9cda3e9f6583c639809ca46c39f7dcd7e`.
+On the next launch the old record was absent and Rondo required both opening
+cartoons. The user completed stage 0 and began stage 1 without a fault. The
+captured overlay shows `U02BF W0000`, another exercised pass of the p19
+arbitration fix.
+
+APF created a fresh 2048-byte root `Saves/.sav`, not a cue-named file. Its
+SHA256 is
+`e0a82c5310f69e5d73d73452e143d45fa3c6090f66604b55d210368399eabcff`.
+It begins with `HUBM`, contains `DRACULA X`, and differs from the preserved old
+image at 46 byte positions. Reset was pressed while trying to quit, but the new
+file was written at 09:25:24 and is structurally recognizable. A relaunch is
+still required to prove that it loads.
+
+The manifest order `0, 100, 1` is therefore not a working CD save-naming fix
+for this combined HuCard and CD core. p20 must not be released as though it
+provides cue-derived saves. Any next implementation changes the tested source
+and requires a new timing-clean build, card install and hardware verification.
+The exact screenshots and both save images are cataloged under ignored
+`build/evidence/p20/fresh-save/`.
+
+After that catalog was verified, the wrong fresh root `.sav` and both
+follow-up screenshots were removed from the card at the user's request. The
+old image remains there as `Saves/.sav.p20-pre-fresh-test`, and all removed
+files remain in ignored local evidence. The card is mounted for the resumed
+session.
+
+The next design is an explicit runtime binding rather than another ordering
+guess. Once the cue path is known, target command `0x0192` can open or create
+the corresponding path under `Saves/pce/common/` in save slot 1. A following
+`0x0180` can load it through the existing save bridge before CD reset is
+released. HuCards keep their current automatic slot-0 naming because the
+rebind runs only after a cue is parsed.

@@ -11,15 +11,18 @@ was exercised. Repeatability across cold launches is not established yet.
 
 | | |
 |---|---|
-| branch | `cd-streaming`, p18 committed as `46f9a34` |
-| working tree | p19 arbitration fix plus p20 save ordering, docs and regression check, uncommitted |
+| branch | `cd-streaming`, p19 and p20 committed as `ec08dd7` on p18 `46f9a34` |
+| working tree | completed p20 hardware-result handoff updates, uncommitted |
 | on the card | p20, `pce.rev` MD5 `ac08484a444b6bae18520f65f0ae8a00` |
 | build | kira LXC 151, `STANDARD FIT`, setup `+2.297 ns`, hold `+0.098 ns` |
+| card save | wrong fresh `.sav` removed; old save preserved as `.sav.p20-pre-fresh-test` |
+| card state | mounted at `/run/media/kroy/pocket`; resolve by mount point, never `/dev/sdX` |
 | worktree | `worktrees/p5` on `cd-adpcm`, nothing committed |
 
-p19 screenshots and the two candidate CD saves are copied off the removable
-card under ignored `build/evidence/p19/`. p20 is built, timing-clean, packaged,
-installed and hash-verified. It now needs the hardware test below.
+p19 and p20 screenshots plus the candidate CD saves are copied off the
+removable card under ignored `build/evidence/`. p20 is built, timing-clean,
+packaged, installed, hash-verified and tested once on hardware. Its four
+screenshots were verified locally and then removed from the card as requested.
 
 ## What p19 found
 
@@ -40,7 +43,11 @@ p20 reorders the first manifest slots to `0, 100, 1`: Cartridge or System Card,
 cue, Save. This preserves HuCard naming and makes the cue name a CD save. The
 save-size datatable write moved from manifest index 1 to index 2, and the
 manifest checker enforces both facts. The good root `.sav` was not migrated,
-so the test cannot pass accidentally against an old file.
+but APF reused it anyway. p20 showed the existing `BRO` record at 4 percent,
+reached normal stage play, and updated that same root save by one byte on exit.
+Persistence therefore passes across the p19 to p20 core replacement. A later
+fresh launch also created root `Saves/.sav`, not a cue-named save. The reorder
+does not fix CD save naming in this combined core.
 
 ## What p18 found
 
@@ -102,8 +109,11 @@ All measured on hardware:
 
 ## Still open
 
-1. p20 save naming and persistence across both core exit and Pocket reboot.
-2. Three clean CD launches to stage play with `U` moving and `W=0000` in each.
+1. Implement a runtime save-slot rebind from the cue path. APF clones automatic
+   nonvolatile names only from the first manifest slot, so ordering alone
+   cannot preserve HuCard naming and name a later runtime cue.
+2. One more clean p20 launch to stage play with `U` moving and `W=0000`, also
+   confirming that the new save survived the accidental reset.
 3. HuCard save naming after the shared manifest reorder.
 4. Random or looping sound effects need repeatability after the data-bus fix.
 5. Two of three SAPSP address forms remain unexercised.
@@ -112,22 +122,80 @@ All measured on hardware:
    `Castlevania - Rondo of Blood.cht` is on the card, five titles, six pokes.
 8. Whether `STANDARD FIT` should be the project default rather than an env var.
 
-## p20 hardware test
+## p20 hardware result and next work
 
-1. Launch Rondo once. It is expected not to see root `Saves/.sav`.
-2. Create a fresh record, quit the core, and check that the card created
-   `Saves/pce/common/Castlevania - Rondo of Blood.sav`. A new root `.sav` or a
-   BIOS-named save fails p20 immediately.
-3. Relaunch the core and verify the same record, then reboot the Pocket and
-   verify it once more.
-4. Launch one HuCard with a known save and confirm its game-named save loads.
-5. Repeat the Rondo launch to stage play three times. Capture `U` and `W` each
-   time. `U` must be nonzero and `W` must stay `0000`.
+The first p20 run loaded the old root `.sav`, showed `BRO` at 4 percent, and
+reached normal stage play. The final overlay is `F0176 R0176 U0144 W0000`.
+The save changed at one byte after exit, proving that the same file was loaded
+and flushed. This is one complete p20 pass and a second successful run of the
+p19 arbitration fix.
+
+The approved fresh test is complete. The old record was absent and Rondo
+required both opening cartoons. The user completed stage 0 and began stage 1
+without a fault. A gameplay screenshot and its diagnostic counterpart were
+copied under ignored `build/evidence/p20/fresh-save/`; the overlay shows
+`U02BF W0000`.
+
+APF created a new 2048-byte root `Saves/.sav` at 09:25:24. It created no
+cue-named file under `Saves/pce/common/`. The fresh save has SHA256
+`e0a82c5310f69e5d73d73452e143d45fa3c6090f66604b55d210368399eabcff`,
+begins with `HUBM`, contains `DRACULA X`, and differs from the old image at 46
+byte positions. The old image remains preserved as
+`Saves/.sav.p20-pre-fresh-test`, SHA256
+`b0114f4883532e6c83f2d0e83bc532d9cda3e9f6583c639809ca46c39f7dcd7e`.
+Both were copied and byte-verified locally before analysis.
+
+Reset was pressed while trying to quit. The new save exists and is
+structurally recognizable, so the reset did not prevent a write, but a relaunch
+is still needed to prove the new record loads. That relaunch can also supply
+the third gameplay pass.
+
+After byte verification and cataloging, the user chose to remove the wrong
+fresh root `.sav`. The two follow-up screenshots were also removed under the
+standing capture policy. Their local copies remain under
+`build/evidence/p20/fresh-save/`. The preserved old image remains on the card
+as `.sav.p20-pre-fresh-test`. The card is mounted for continued development.
+
+The fresh naming test therefore fails: manifest order `0, 100, 1` still gives
+APF a root save name. Do not describe p20 as a CD save-naming fix. The next
+implementation must be built, installed and hardware-tested as a new artifact.
+
+The authoritative APF rule is that bit 2 clones a nonvolatile name from the
+primary data slot, defined as the first entry in `data.json`. It does not use
+the nearest preceding selected slot. A combined core cannot make both slot 0
+HuCards and later slot 100 cues primary through ordering. The next experiment
+therefore keeps the proven combined launch flow and uses target command
+`0x0192` to bind save slot 1 explicitly to a path derived from the selected
+cue, followed by `0x0180` to load that file before releasing CD reset.
+
+## Release alignment
+
+The p20 card artifact was built from the exact p19 and p20 functional source
+now committed as `ec08dd7`. The report says `commit: nogit` because the runner
+received a tracked-file archive rather than a Git checkout, so it is a hardware
+test artifact, not the final release artifact.
+
+Before tagging or packaging a release:
+
+1. Resolve the failed fresh CD save naming, then finish one repeat CD launch,
+   the HuCard save regression and the CD cheat test. Record every result here
+   and in `docs/CD-PLAN.md`.
+2. Decide which diagnostics remain. The cycling CD overlay was built for
+   troubleshooting and the plan says not to ship it as normal presentation.
+3. Commit all release source and documentation. Build that commit on a verified
+   runner with `STANDARD FIT`, require every timing analysis to pass, and record
+   the commit plus bitstream hash.
+4. Install that exact built artifact on the card and perform the final smoke
+   test. The release archive must contain the byte-identical tested bitstream,
+   manifests and assets, not a later rebuild or a separately packaged tree.
+5. Do not push or tag until explicitly requested.
 
 ## Things that will bite
 
 * **Screenshots come off the card**, `/run/media/kroy/pocket/Memories/
   Screenshots/`. Nowhere else. Check the mount before concluding anything.
+  Copy, hash-verify and catalog each batch locally, then remove that verified
+  batch from the card.
 * **Find the card by mount point, not `/dev/sdX`.** The letter moves between
   insertions. `findmnt -rn -o SOURCE /run/media/kroy/pocket`.
 * **Merge onto the card, never `--delete`.** Saves, cheats, discs and dumps

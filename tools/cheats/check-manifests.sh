@@ -71,15 +71,14 @@ fi
 dupe=$(jq -r '[.data.data_slots[].id] | group_by(.) | map(select(length>1)) | flatten | @csv' "$C/data.json")
 [ -z "$dupe" ] || bad "duplicate data slot ids: $dupe"
 
-# APF derives the nonvolatile filename from the selected asset preceding the
-# save slot. Slot 0 is either a HuCard or the default System Card. Putting the
-# cue after it lets a CD selection replace the default BIOS as the save name;
-# putting Save immediately after both preserves HuCard naming too. The save
+# APF clones a nonvolatile filename only from the first manifest entry. Keep
+# the HuCard in that primary position and its automatic Save immediately after
+# it. CD mode explicitly rebinds Save from the later cue path in RTL. The save
 # size datatable address in core_top.v is coupled to this array index.
-media_save_order=$(jq -r '[.data.data_slots[0:3][].id] | join(",")' "$C/data.json")
-[ "$media_save_order" = "0,100,1" ] || bad "first data slots must be 0,100,1 so HuCards and cues name their saves"
-if ! rg -q 'datatable_addr <= 2 \* 2 \+ 1;' "$ROOT/target/pocket/core_top.v"; then
-  bad "core_top.v must publish the save size at data slot index 2"
+primary_save_order=$(jq -r '[.data.data_slots[0:2][].id] | join(",")' "$C/data.json")
+[ "$primary_save_order" = "0,1" ] || bad "first data slots must be primary media 0 and Save 1"
+if ! rg -q 'datatable_addr <= 1 \* 2 \+ 1;' "$ROOT/target/pocket/core_top.v"; then
+  bad "core_top.v must publish the save size at data slot index 1"
 fi
 
 # Two slots sharing the upper nibble means two data_loaders answering the same

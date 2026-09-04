@@ -878,10 +878,10 @@ module core_top (
       datatable_wren <= 1;
 
       datatable_data <= mb128_enable ? 32'h20000 : 32'h800;
-      // Data slot index 2, not id 1. In data.json the two selectable media
-      // slots must precede Save so APF derives the nonvolatile filename from
-      // the HuCard or cue rather than from the default System Card.
-      datatable_addr <= 2 * 2 + 1;
+      // Data slot index 1, not id 1. HuCards keep APF's automatic slot-0 name;
+      // after a cue loads, dataslot_path explicitly rebinds this same save slot
+      // to a cue-derived path before the CD machine leaves reset.
+      datatable_addr <= 1 * 2 + 1;
     end
   end
 
@@ -1452,7 +1452,10 @@ module core_top (
       .clk_sys_42_95(clk_sys_42_95),
       .clk_mem_85_91(clk_mem_85_91),
 
-      .core_reset(~reset_n || reset_delay > 0),
+      // For CD mode, dataslot_path now opens both the bin and the cue-derived
+      // save and loads that save before asserting bin_ready. Holding reset here
+      // prevents the System Card from observing stale root-save contents.
+      .core_reset(~reset_n || reset_delay > 0 || (cue_loaded && !bin_ready)),
       .pll_core_locked(pll_core_locked),
 
       .sgx(is_sgx_s),
