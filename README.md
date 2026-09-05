@@ -51,9 +51,11 @@ logic and block RAM with the engine in it rather than against the ceiling.
 `docs/BASELINE.md` has the measurements.
 
 A SuperGrafx game will not run correctly on a core that no longer has the
-hardware, so `.sgx` is not offered rather than offered and broken. If you want
-SuperGrafx, run agg23's core: the two install side by side and this one does not
-replace it.
+hardware. `.sgx` still appears in the loader, because the cartridge slot doubles
+as the System Card slot and the manifest lists both extensions, but a SuperGrafx
+game loaded here renders as a plain PC Engine and will not look right. If you
+want SuperGrafx, run agg23's core: the two install side by side and this one
+does not replace it.
 
 ## PC Engine CD
 
@@ -134,17 +136,21 @@ than `1.1`. **A Pocket on older firmware will not load this core.**
 | Controller turbo | **works**, upstream's |
 | Per-game memory cards | **works**, upstream's |
 | SuperGrafx | **off.** It paid for the cheat engine and it is paying for CD as well. See above |
-| PC Engine CD | **works for the hardware target.** Rondo completes stage 0, starts stage 1, and reloads its cue-named save. See above |
+| PC Engine CD | **works for the hardware target.** Rondo completes stage 0, starts stage 1, reloads its cue-named save, and takes cheats from a `.cht` beside its cue. One disc has been tested. See above |
 | Cartridges | not supported |
 | **Show cheats**, the on-screen list of enabled cheats | **works** |
 | A code store meter | not built. The store holds 32 codes, `MAX_CODES` in `cheat_poker.sv` and `cheat_loader.sv`, and the loader stops committing at it, but nothing shows how full it is |
 
 ## Versions
 
-The five projects in this set share one version number. The set is at
-**0.9999**. The next release is 0.99991, then 0.99992, and so on: each one adds
-to the tail rather than climbing toward a round number. Nothing here reaches
-1.0, because 1.0 is a claim to be finished and none of this is.
+Every project in this set sits at **0.9999** and none of them moves off it.
+1.0 is a claim to be finished, none of this is finished, and a version that
+never climbs cannot drift into making that claim by accident.
+
+The projects are not kept in step with each other. A release adds the short
+SHA of the commit it was cut from, so a tag reads `v0.9999.d5d93c8`, and two
+tags that share the prefix are unrelated releases. Read the tail, not the
+number.
 
 Provenance is stated in words, above and in the credits, rather than implied by
 a number.
@@ -207,7 +213,8 @@ Upstream's options, unchanged:
 * **Extra Sprites** allows more sprites per line and reduces flickering in some
   games. **Raw RGB Color** uses the HUC6260's raw palette rather than the
   composite one.
-* **Master Audio Boost** and **PCM Audio Boost** for games that are too quiet.
+* **Master Audio Boost** and **PCM Audio Boost** for games that are too quiet,
+  and **CD Audio Boost** for the CD-DA track on a disc, which is this fork's.
 
 The PC Engine picks its own resolution at will and the Pocket cannot. Upstream
 covers the common ones, so expect black bars on some games; the aspect ratio is
@@ -239,7 +246,7 @@ exists because picking cheats out of 397 database files by hand is tedious.
 Quartus runs in a container and nothing is installed on the host:
 
 ```sh
-make pce      # -> build/pce/{bitstream.rbf_r, sd/, kroy.PCE_<version>.zip, report.txt}
+make pce      # -> build/pce/{pce.rev, sd/, kroy.PCE_<version>.zip, report.txt}
 make test     # the simulation suite
 ```
 
@@ -261,7 +268,7 @@ This core is other people's work with a cheat engine added.
 | | |
 |---|---|
 | [Gregory Estrade](https://github.com/Torlus/FPGAPCE) | FPGAPCE, the original, released into the public domain |
-| [srg320](https://github.com/srg320) and [greyrogue](https://github.com/greyrogue) | TurboGrafx16_MiSTer, the heavily modified MiSTer core. Its `rtl/pce/cd/` is used here unchanged, and `cd_host.sv` is a reimplementation of srg320's `pcecdd.cpp` |
+| [srg320](https://github.com/srg320) and [greyrogue](https://github.com/greyrogue) | TurboGrafx16_MiSTer, the heavily modified MiSTer core. Its `rtl/pce/cd/` is used here with diagnostic counters added and its logic otherwise as it was, and `cd_host.sv` is a reimplementation of srg320's `pcecdd.cpp` |
 | [agg23](https://github.com/agg23) | the Pocket port this forks, and analogue-pocket-utils |
 | [vanfanel](https://github.com/vanfanel/openfpga-pcengine) | fixes to that port, merged into it before this fork and present in this history |
 | [Mazamars312](https://github.com/Mazamars312/openfpga-pcengine-cd/) | the working Pocket PC Engine CD core. None of its RTL is used, but its `data.json` is the prior art the cue plus bin slot layout here was checked against |
@@ -294,5 +301,6 @@ supplied under Analogue's own software licence agreement and the Pocket EULA
 linked from their headers, which provide that where the MIT or GNU licences must
 apply, those prevail.
 
-Binary releases here are built by CI from a tagged commit of this repository,
-which is the corresponding source for them.
+Binary releases here are built from the exact tagged commit of this repository
+on a controlled builder, and the tag is the corresponding source for them. The
+release carries the zip, its SHA-256, and the timing report.

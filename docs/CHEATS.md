@@ -161,9 +161,6 @@ Matches the deployed GB/GBC core, in content and in order.
 | Reset core | `0x050` | |
 | Cheats enabled | `0x404` | Off by default |
 | Show cheats | `0x408` | Off by default |
-| DEBUG SD Read Probe | `0x40C` | CD work, stripped before release |
-| DEBUG Probe Chunk | `0x410` | CD work, stripped before release |
-| DEBUG Path Probe | `0x414` | CD work, stripped before release |
 | ...core options... | | |
 
 The menu lists variables in **array order**, not by id, so the two cheat
@@ -219,7 +216,7 @@ scaffolding has since been removed; the technique is worth remembering.
 | Poker held off during load | `cheat_busy`, OR'd into `blocked` |
 | Bridge writes | `core_top.v`, `32'h404` and `32'h408` |
 | Clock-domain crossing | `settings_s` synchroniser, WIDTH 16 |
-| Menu entries | `interact.json`, ids 81 and 82; the CD diagnostics are 83 to 85 |
+| Menu entries | `interact.json`, ids 81 and 82. The CD diagnostics that sat at 83 to 85 during the CD work were removed before release |
 
 `0x400` is the `Swap ROM Bit Order` toggle; the cheat addresses start at
 `0x404`, and the CD work continues to `0x414`. Note this core decodes small bridge addresses directly and does **not**

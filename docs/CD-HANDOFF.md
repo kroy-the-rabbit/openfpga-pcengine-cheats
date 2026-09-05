@@ -1,4 +1,4 @@
-# CD handoff, 2026-09-03 (night)
+# CD handoff, 2026-09-04
 
 Read this, then `docs/CD-PLAN.md`, 5k to 5s for the last sessions.
 
@@ -9,21 +9,30 @@ no host processor. p19 fixed the phase-dependent shared data-bus corruption
 found after p18, and its hardware counters prove that the fixed collision case
 was exercised. Repeatability across cold launches is not established yet.
 
+**Rondo is the release target and current hardware evidence.** The user may
+test additional cue files later as optional follow-up coverage.
+
+**p24 is the current release candidate.** It removes the CD diagnostics that
+p23 mistakenly left under `Show cheats`. Hardware presentation remains.
+
 | | |
 |---|---|
-| branch | `cd-streaming`, p21 functional source `b86a38b` on p19 and p20 `ec08dd7` |
-| working tree | p21 build artifacts and hardware evidence are ignored under `build/` |
-| on the card | p21, `pce.rev` MD5 `37589416822862010413a4af78ab318a` |
-| build | p21 on sisko LXC 150, `STANDARD FIT`, setup `+2.408 ns`, hold `+0.072 ns` |
+| branch | `cd-streaming`, p24 release fix `d5d93c8`; p21 functional source `b86a38b` |
+| working tree | this handoff update is uncommitted; p24 artifacts and hardware evidence are ignored under `build/` |
+| on the card | p24 installed and hash-verified. Hardware pass reported by Kroy 2026-09-04: `Show cheats` clean, menu order confirmed, HuCard save regression and CD cheat test passed, Rondo repeated |
+| build | p24 on Kira, 1218 seconds, 13,026 ALMs, all timing passed |
 | card save | cue-named Rondo save reloads at 4 percent; root `.sav` remains absent |
-| card state | mounted at `/run/media/kroy/pocket`; resolve by mount point, never `/dev/sdX` |
+| card state | mounted `rw` at `/run/media/kroy/pocket`; leave mounted |
 | worktree | `worktrees/p5` on `cd-adpcm`, nothing committed |
 
 p19 and p20 screenshots plus the candidate CD saves are copied off the
-removable card under ignored `build/evidence/`. p21 is built, timing-clean,
+removable card under ignored `build/evidence/`. p21 was built, timing-clean,
 packaged, installed, hash-verified, and proven to create and reload a
 cue-derived save. Its pre-write and post-stage-0 save states are byte-verified
-locally under `build/evidence/p21/`.
+locally under `build/evidence/p21/`. p23 was installed and hash-verified, then
+rejected because its `Show cheats` overlay still contained the doubled CD
+diagnostic block. p24 removes that block and is now installed and
+hash-verified.
 
 ## What p19 found
 
@@ -115,8 +124,9 @@ All measured on hardware:
    effects after the data-bus fix.
 3. Two of three SAPSP address forms remain unexercised.
 4. Eight audio reads fail at startup with APF result 2, unexplained.
-5. **Cheats have never been run against a CD game.** The point of the fork.
-   `Castlevania - Rondo of Blood.cht` is on the card, five titles, six pokes.
+5. ~~Cheats have never been run against a CD game.~~ Closed 2026-09-04: Kroy
+   reports cheats verified on cue plus bin against p24, from
+   `Castlevania - Rondo of Blood.cht`, five titles, six pokes.
 6. Whether `STANDARD FIT` should be the project default rather than an env var.
 
 ## p20 hardware result and next work
@@ -205,26 +215,56 @@ hash before removing any exact captured file from the card.
 
 ## Release alignment
 
-The card carries p21, built from exact detached functional commit `b86a38b`.
-Its installed bitstream and manifest are byte-identical to the timing-clean
-local package, and that artifact passed the CD save create, write, and reload
-test. It is still a hardware candidate rather than the final release artifact.
-Documentation follows the functional commit, and more hardware-driven source
-changes may still be required.
+The current built candidate is p24 from exact commit
+`d5d93c85f80f8be3418a34e7348b330ecd1ba24a`. Kira built it with Quartus Lite
+25.1std build 1129 in 1218 seconds. It uses 13,026 of 18,480 ALMs and passed
+all timing analyses: setup `+2.193 ns`, hold `+0.098 ns`, recovery
+`+14.547 ns`, removal `+0.178 ns`, and minimum pulse width `+0.831 ns`.
+Kira uses low-voltage CPUs, so its longer duration relative to Sisko is
+expected and is not a fit regression.
 
-Before tagging or packaging a release:
+The p24 raw RBF SHA256 is
+`271a41ff73669c9107cdb789612e76fc1fabcaca635c1172c7bfdd8d5bc8a92d`.
+The packaged `pce.rev` has SHA256
+`02b60ec58b1bc4f0fae8ee5970c81a220d04a269a0f0e86024682ee633c8fd4e`
+and MD5 `9166007471fd51913201f632d3ace3d6`. Packaged `data.json` has SHA256
+`37efbe60ab3bdc8cc06bb0021fac6ddb6dadb47facb98dfd03a596fbb448d009`.
+Packaged `info.txt` has SHA256
+`9714ec38eabbd50c69981d2c78cc8d5fa4d42378b3a7852cf6559e34dba3c3e3`.
+The development package `kroy.PCE_0.9999.zip` has SHA256
+`6398d58d2a808d22f8b5b9873caf745310ea5121b35f64903fb1085579e3cac9`.
+Local `make test` and `make dist BUILD_NAME=p24` passed. The packaged manifest
+has the visible loader order `Cartridge`, `Disc (cue)`, then `Cheats`.
 
-1. Complete the HuCard save regression and CD cheat test. Record every result
-   here and in `docs/CD-PLAN.md`.
-2. Decide which diagnostics remain. The cycling CD overlay was built for
-   troubleshooting and the plan says not to ship it as normal presentation.
-3. Commit all release source and documentation. Build that commit on a verified
-   runner with `STANDARD FIT`, require every timing analysis to pass, and record
-   the commit plus bitstream hash.
-4. Install that exact built artifact on the card and perform the final smoke
-   test. The release archive must contain the byte-identical tested bitstream,
-   manifests and assets, not a later rebuild or a separately packaged tree.
-5. Do not push or tag until explicitly requested.
+Commit `d5d93c8` sets `CD_DIAG = 0` and `CD_DIAG_SCALE = 1`, so `Show cheats`
+contains only its normal header and cheat list. `make test` now enforces both
+release values. Removing the diagnostic block reduced utilization by 1,995
+ALMs relative to p23.
+
+The first ordinary-user p24 `rsync -av` reported copying the package, but the
+post-copy hash still identified the p23 bitstream. A checksum-based
+`rsync -avc` then copied `pce.rev`, and all three installed SHA256 checks
+matched the p24 package values above. Always verify content hashes after a card
+copy. The card remains mounted and must not be unmounted unless explicitly
+requested.
+
+p21 remains the last hardware-tested installation. It passed CD save creation,
+writeback, and reload at 4 percent. p24 retains that functional logic and is
+the candidate for the next hardware pass.
+
+Before tagging or packaging a release, all reported done by Kroy 2026-09-04
+against the installed p24:
+
+1. `Show cheats` contains only the normal cheat header and list. Done.
+2. Visible menu order confirmed on hardware; HuCard save regression and CD cheat
+   test passed. Done. The detail belongs in `docs/CD-PLAN.md` and is not yet
+   written there.
+3. Rondo gameplay repeated. Done.
+4. Push and tag were explicitly requested 2026-09-04. The release is
+   `v0.9999.d5d93c8` on exact commit `d5d93c8`, from the p24 bitstream
+   repackaged with `RELEASE_NAME=v0.9999.d5d93c8 BUILD_NAME=p24 make dist`:
+   same `pce.rev`, `data.json` and `info.txt` hashes as above, `core.json`
+   stamped `0.9999.d5d93c8`.
 
 ## Things that will bite
 
@@ -233,7 +273,8 @@ Before tagging or packaging a release:
   Copy, hash-verify and catalog each batch locally, then remove that verified
   batch from the card.
 * **Find the card by mount point, not `/dev/sdX`.** The letter moves between
-  insertions. `findmnt -rn -o SOURCE /run/media/kroy/pocket`.
+  insertions. Use `findmnt -rn -T /run/media/kroy/pocket -o
+  TARGET,FSTYPE,OPTIONS`; do not capture or reuse the source device name.
 * **Merge onto the card, never `--delete`.** Saves, cheats, discs and dumps
   live there. Unmount only when told.
 * **A single overlay frame is worth nothing.** Four times across these sessions
@@ -288,3 +329,15 @@ shared interface into `build/p21/`, then packaged locally with
 `make dist BUILD_NAME=p21`. The package was merged onto the card and both
 `pce.rev` and `data.json` matched the p21 hashes in the dedicated section
 above. Do not use the p20 values in the historical paragraph.
+
+p23 was built from exact commit `c02592f` through `tools/runner-build` on Kira
+and fetched into ignored `build/p23/`. Kira's low-voltage CPUs make it slower
+than Sisko. The fit passed all timing, and `make dist BUILD_NAME=p23` produced
+the hashes in the release-alignment section. The package was merge-copied to
+the card and its three changed files were hash-verified. It is rejected because
+the release-facing `Show cheats` overlay still contained CD diagnostics.
+
+p24 was built on Kira through `tools/runner-build` from exact commit
+`d5d93c85f80f8be3418a34e7348b330ecd1ba24a`, fetched into ignored
+`build/p24/`, packaged locally, and installed with a checksum-forced merge
+copy. Its timing and installed hashes match the release-alignment section.

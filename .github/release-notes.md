@@ -1,7 +1,7 @@
 **Download `kroy.PCE_<version>.zip` below**, not the "Source code"
-archives. Those are the repository, and the bitstream is built by CI rather
-than committed, so a core installed from one is listed by the Pocket but cannot
-start: *error in framework, can't find bitstream*.
+archives. Those are the repository, and the bitstream is not committed, so a
+core installed from one is listed by the Pocket but cannot start: *error in
+framework, can't find bitstream*.
 
 ## Installing
 
@@ -43,11 +43,15 @@ The file loaders are ordered as **Load Cartridge**, **Load Disc (cue)**, then
 
 This release adds a host-free CD drive in FPGA logic. It parses cue sheets,
 streams data and CD audio from the bin, and stores backup RAM under the cue's
-name. Castlevania: Rondo of Blood was verified through both opening cinematics,
-stage 0, the start of stage 1, and a save reload at 4 percent completion.
+name: `Saves/pce/common/<cue name>.sav`. Castlevania: Rondo of Blood was
+verified through both opening cinematics, stage 0, the start of stage 1, a save
+reload at 4 percent completion, and cheats applied from a `.cht` beside its cue.
 
-The verified format is one cue plus one bin. Multi-bin compatibility is not
-claimed yet.
+**One disc has been tested.** Every CD claim above is a claim about Rondo. The
+verified format is one cue plus one bin; multi-bin compatibility is not claimed.
+
+**Show cheats** contains only the cheat header and list. The CD diagnostics that
+earlier development builds drew there are gone.
 
 ## Differences from the upstream agg23 port
 
