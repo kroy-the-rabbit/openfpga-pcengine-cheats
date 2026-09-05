@@ -1,57 +1,56 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-# Builds the core with Quartus and attaches the zip to the release for the tag
-# that triggered it.
-#
-# Quartus Prime Lite needs no licence and no account, so this runs on a stock
-# runner: the same tools/podman/build.sh the local harness runs, with Quartus
-# taken from the runner instead of the container, so a CI build and a local one
-# are the same build rather than two scripts that have to be kept in step. The
-# installers are 3.4 GB and are deleted once installed rather than cached,
-# because runner disk is tighter than runner bandwidth.
-#
-# The build fails if the design misses timing. Quartus exits 0 on negative
-# slack, so tools/podman/report.sh checks worst-case slack itself and exits 3.
-# That is why the gate is here and not in a report somebody reads later: a
-# bitstream with negative slack may work on one bench and fail on a handheld.
-name: release
+name: Release
 
+# A release is a tag on main, and the package it names was built somewhere
+# this workflow is not.
+#
+# Quartus runs only on the controlled builders, sisko and kira, through the
+# orchestrator's tools/runner-build, against a Quartus image that is private
+# and stays so: Quartus Lite needs no licence, but that grants no right to
+# redistribute its installed files, so the image is never uploaded to Actions
+# or a registry. The behaviour the old hosted build carried lives on there,
+# because it lives in the harness rather than in this file: STANDARD FIT and
+# STRICT_TIMING through build.sh, report.sh exiting 3 on negative slack, and a
+# seed retry on a timing miss. A package that ships was fit to flash where it
+# was built.
+#
+# What CI does on a tag is check that the release the orchestrator published
+# is the one the tag names: the package is present, its checksums verify, and
+# the version stamped into core.json is the tag. A tag with no package, or a
+# package stamped from another commit, fails here and says so. Nothing here
+# builds, uploads or clobbers.
+#
+# The ancestry check is what keeps this a release of main: `on: push: tags`
+# has no branch filter and GitHub offers none, so a tag on a scratch branch
+# would otherwise pass. The branch is named in env because it has moved
+# before, from cheats to master to main.
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
 
 env:
-  QVER: 25.1std.0
-  QBUILD: "1129"
-  QROOT: /opt/intelFPGA_lite/25.1std
   RELEASE_BRANCH: main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  # A tag fires this workflow wherever it was made: `on: push: tags` has no
-  # branch filter and GitHub offers none, so tagging a scratch branch would
-  # otherwise publish it as a release. This proves the tagged commit is on the
-  # release branch before anything else runs.
-  #
-  # Its own job rather than a step inside the build, so the refusal costs
-  # seconds instead of failing after a Quartus install and a fit.
-  #
-  # The branch is named in env rather than written into the check, because it
-  # has already moved twice: this fork released from cheats, then master, and
-  # now main. All three forks are on main now, and the GB/GBC one no longer
-  # keeps a master mirroring upstream at all.
-  guard:
+  release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
     steps:
-      # Full history: the ancestry test needs the branch and the tag in the
-      # same clone, and a shallow one has neither.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Releases come from ${{ env.RELEASE_BRANCH }}
+
+      - name: Require the tag to be on the release branch
         run: |
           git fetch --no-tags origin "$RELEASE_BRANCH"
           if git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
-            echo "$GITHUB_REF_NAME is on $RELEASE_BRANCH"
+            echo "$GITHUB_REF_NAME is on $RELEASE_BRANCH."
           else
             echo "::error::${GITHUB_REF_NAME} is not on ${RELEASE_BRANCH}." \
                  "Releases are built from that branch only; merge it first" \
@@ -59,129 +58,24 @@ jobs:
             exit 1
           fi
 
-
-  build:
-    needs: guard
-    runs-on: ubuntu-latest
-    timeout-minutes: 300
-    # 22.04: Quartus wants libtinfo5 and libncurses5, which 24.04 dropped.
-    container: ubuntu:22.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Userland Quartus needs
+      - name: Manifest and cheat fixture checks
         run: |
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            ca-certificates curl locales git jq rsync zip file \
-            libglib2.0-0 libsm6 libice6 libx11-6 libxext6 libxi6 libxrender1 \
-            libxrandr2 libxtst6 libxft2 libxcb1 libfontconfig1 libfreetype6 \
-            libncurses5 libncursesw5 libtinfo5 libstdc++6 libdbus-1-3 \
-            libpng16-16 libbz2-1.0 libssl3 libxcursor1 libxinerama1 libxfixes3
-          locale-gen en_US.UTF-8
+          sudo apt-get update -qq && sudo apt-get install -y -qq jq
+          make test
 
-      - name: Fetch the installers
-        run: |
-          df -h /
-          tools/podman/fetch-installers.sh
-
-      - name: Install Quartus Lite, Cyclone V only
-        run: |
-          tools/podman/dl/QuartusLiteSetup-${QVER}.${QBUILD}-linux.run \
-            --mode unattended --unattendedmodeui none --accept_eula 1 \
-            --installdir ${QROOT}
-          rm -rf tools/podman/dl "${QROOT}/uninstall" "${QROOT}/logs"
-          ${QROOT}/quartus/bin/quartus_sh --version
-          df -h /
-
-      # The worst hold path in this design is inside the PLL's own output
-      # counter and lands around +0.10 ns, so placement variance alone can tip
-      # it negative: two of five builds of unchanged RTL missed hold at the
-      # default seed and closed at seed 2. The fitter seed is the documented
-      # answer, so a timing miss refits rather than failing the release. Only a
-      # timing miss retries - report.sh exits 3 for that and nothing else does -
-      # so a real error still stops the build on the first try.
-      #
-      # STANDARD FIT for a related reason: AUTO FIT, which the qsf asks for,
-      # lowers effort as soon as it believes timing is achievable, and at the
-      # same seed that was the difference between -0.025 ns and +0.109 ns.
-      # It is also faster here. See docs/BASELINE.md.
-      - name: Build
-        env:
-          LANG: en_US.UTF-8
-          HOME: /tmp
-          FITTER_EFFORT: STANDARD FIT
-          STRICT_TIMING: "1"
-        run: |
-          export QUARTUS_ROOTDIR="${QROOT}/quartus"
-          git config --global --add safe.directory "$PWD"
-          for seed in '' 2 3; do
-            [ -n "$seed" ] && echo "::warning::timing missed, refitting with seed $seed"
-            set +e
-            RELEASE_NAME="${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}" \
-              SEED="$seed" tools/podman/build.sh
-            rc=$?
-            set -e
-            [ $rc -eq 0 ] && exit 0
-            [ $rc -eq 3 ] || exit $rc
-          done
-          echo "::error::missed timing on every seed"
-          exit 3
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: core-pce
-          path: build/pce/*.zip
-          if-no-files-found: error
-
-      # The report is the evidence behind the numbers in docs/BASELINE.md and
-      # the first thing anyone wants when a build behaves differently from the
-      # last one. Kept whether or not the build passed.
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: report
-          path: |
-            build/pce/report.txt
-            build/pce/build.log
-          if-no-files-found: warn
-
-  publish:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: core-pce
-          path: dist
-      - name: Attach the core to ${{ github.ref_name }}
+      # The published package, checked rather than produced. `gh` reads the
+      # release; nothing here writes one.
+      - name: Verify the published package
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
         run: |
-          tag="${{ github.ref_name }}"
-
-          # Bare filenames, so `sha256sum -c` works in whatever directory a
-          # browser downloaded the zip into.
-          (cd dist && sha256sum *.zip > SHA256SUMS)
-
-          # The notes say which asset to download. GitHub attaches "Source code"
-          # archives to every release and those contain no bitstream, so a core
-          # installed from one is listed by the Pocket and cannot start.
-          # Alpha, beta, rc and testing tags publish as prereleases. A tag is
-          # just a label and -testing means "cut so one thing can be tried on
-          # hardware", which is the least finished kind of tag here. Without
-          # this every tag lands as a full release and the repository offers a
-          # test build as its latest.
-          case "$tag" in
-            *-alpha*|*-beta*|*-rc*|*-testing*) pre=--prerelease ;;
-            *) pre= ;;
-          esac
-          gh release view "$tag" >/dev/null 2>&1 \
-            || gh release create "$tag" --title "$tag" $pre \
-                 --notes-file .github/release-notes.md
-          gh release upload "$tag" dist/*.zip dist/SHA256SUMS --clobber
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          zip="kroy.PCE_${version}.zip"
+          mkdir -p dist && cd dist
+          gh release download "$tag" -p "$zip" -p SHA256SUMS -p report.txt
+          sha256sum -c SHA256SUMS
+          unzip -p "$zip" Cores/kroy.PCE/core.json \
+            | python3 -c "import json,sys; v=json.load(sys.stdin)['core']['metadata']['version']; print('stamped', v); sys.exit(v != '$version')"
+          echo "$tag: package present, checksums verified, version stamped."
