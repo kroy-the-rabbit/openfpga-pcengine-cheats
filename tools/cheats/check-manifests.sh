@@ -78,17 +78,17 @@ dupe=$(jq -r '[.data.data_slots[].id] | group_by(.) | map(select(length>1)) | fl
 # hidden in the menu, so 0,1,100,2 presents Cartridge, Disc, then Cheats.
 primary_menu_order=$(jq -r '[.data.data_slots[0:4][].id] | join(",")' "$C/data.json")
 [ "$primary_menu_order" = "0,1,100,2" ] || bad "first data slots must be 0,1,100,2 for Cartridge, Save, Disc, Cheats"
-if ! rg -q 'datatable_addr <= 1 \* 2 \+ 1;' "$ROOT/target/pocket/core_top.v"; then
+if ! grep -qE 'datatable_addr <= 1 \* 2 \+ 1;' "$ROOT/target/pocket/core_top.v"; then
   bad "core_top.v must publish the save size at data slot index 1"
 fi
 
 # Show cheats is release-facing UI. The CD diagnostic block replaces its
 # normal header and doubled diagnostics consume the entire cheat list, so both
 # troubleshooting settings must be disabled in every package candidate.
-if ! rg -q 'localparam CD_DIAG = 0;' "$ROOT/target/pocket/core_top.v"; then
+if ! grep -qE 'localparam CD_DIAG = 0;' "$ROOT/target/pocket/core_top.v"; then
   bad "release core must disable the CD diagnostic overlay"
 fi
-if ! rg -q 'localparam CD_DIAG_SCALE = 1;' "$ROOT/target/pocket/core_top.v"; then
+if ! grep -qE 'localparam CD_DIAG_SCALE = 1;' "$ROOT/target/pocket/core_top.v"; then
   bad "release core must use normal Show cheats scale"
 fi
 
