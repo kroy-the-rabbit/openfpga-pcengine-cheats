@@ -1,3 +1,8 @@
+This update fixes cheat-overlay title alignment. The tested build is
+`7d42867`, with the same bitstream installed and confirmed on the Pocket.
+Existing PC Engine CD support remains included; this update does not add
+newly tested discs or the unfinished CD-audio experiments.
+
 **Download `kroy.PCE_<version>.zip` below**, not the "Source code"
 archives. Those are the repository, and the bitstream is not committed, so a
 core installed from one is listed by the Pocket but cannot start: *error in
@@ -41,7 +46,7 @@ The file loaders are ordered as **Load Cartridge**, **Load Disc (cue)**, then
 
 ## PC Engine CD
 
-This release adds a host-free CD drive in FPGA logic. It parses cue sheets,
+The core includes a host-free CD drive in FPGA logic. It parses cue sheets,
 streams data and CD audio from the bin, and stores backup RAM under the cue's
 name: `Saves/pce/common/<cue name>.sav`. Castlevania: Rondo of Blood was
 verified through both opening cinematics, stage 0, the start of stage 1, a save
