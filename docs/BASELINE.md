@@ -319,4 +319,4 @@ both are worth keeping:
 
 Neither is a shipping feature, and both are already out of `interact.json`.
 The RTL stays, parameterised off, costing nothing. The same obligation now
-applies to the three CD diagnostics added since, listed in `docs/PLAN.md` P6.
+applies to the CD diagnostics added since; `CD_DIAG` is 0 in releases.

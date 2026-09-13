@@ -2,7 +2,7 @@
 //
 // Proves the core can open a file the user never picked.
 //
-// `docs/CD-PLAN.md` P1. The disc arrives as a cue naming one or more bins, and
+// `docs/CD-PLAN.md at 62bc1ee` P1. The disc arrives as a cue naming one or more bins, and
 // the Pocket's file browser only ever hands the core the one file the user
 // chose. Three target commands close that gap:
 //

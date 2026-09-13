@@ -12,7 +12,7 @@
 // putting a soft CPU in the fabric and running a firmware drive on it. See the
 // README.
 //
-// `docs/CD-PLAN.md` P3. `cd.vhd` is only the interface chip: it speaks SCSI to
+// `docs/CD-PLAN.md at 62bc1ee` P3. `cd.vhd` is only the interface chip: it speaks SCSI to
 // a drive that, on MiSTer, is 900 lines of C++ running on a Linux host. The
 // Pocket has no host, so the drive lives here. The specification this is built
 // from is §5e of that document, extracted from `cd.vhd`, `SCSI.vhd` and
@@ -946,7 +946,7 @@ module cd_host (
               // above re-asserts it, because the phase conditions still hold.
               // Across a phase break it stays low for milliseconds; inside a
               // continuous phase the CPU cannot see it at all, and the System
-              // Card re-read the same sectors for ever. See docs/CD-PLAN.md 5p.
+              // Card re-read the same sectors for ever. See docs/CD-PLAN.md at 62bc1ee 5p.
               state <= S_WAITEND;
             end else push_i <= push_i + 12'd1;
           end

@@ -68,7 +68,7 @@ input   wire            savestate_load_err,
 // parameter words here and the host executes it. Written once rather than per
 // command because the CD work needs at least three of them: 0x0180 to read a
 // slot, 0x0190 to ask where the user's file actually lives and 0x0192 to open
-// a file named inside it. See docs/CD-PLAN.md §3.
+// a file named inside it. See docs/CD-PLAN.md at 62bc1ee §3.
 //
 // A slot read wants deferload set in data.json, and core.json has to declare a
 // framework version that has these commands.

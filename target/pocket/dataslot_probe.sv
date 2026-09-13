@@ -2,7 +2,7 @@
 //
 // Measures how fast APF hands the core bytes out of a data slot.
 //
-// `docs/CD-PLAN.md` P0, which this answered: 1104 KB/s at 8KB requests, 6.3x
+// `docs/CD-PLAN.md at 62bc1ee` P0, which this answered: 1104 KB/s at 8KB requests, 6.3x
 // CD-DA on its own, no errors. Kept because the number is a property of a card
 // and a firmware rather than of this core, so it is worth being able to re-ask
 // on a different card.

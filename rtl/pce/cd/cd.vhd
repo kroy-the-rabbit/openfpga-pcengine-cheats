@@ -55,7 +55,7 @@ entity cd is
 
 		-- Diagnostic only, added by this fork; nothing in the CD unit reads it.
 		-- The two counters are the open question: does the ADPCM DMA take bytes
-		-- out of a data in phase that was not its own. See docs/CD-PLAN.md 5q.
+		-- out of a data in phase that was not its own. See docs/CD-PLAN.md at 62bc1ee 5q.
 		--   47..32 DMA_BYTE_CNT     bytes the ADPCM DMA took off the bus
 		--   31..16 DMA_EN_BYTE_CNT  of those, the ones taken on DMA_EN alone
 		--   15..8  ADPCM_CTRL

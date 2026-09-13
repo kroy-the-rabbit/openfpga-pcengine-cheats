@@ -2,7 +2,7 @@
 //
 // CD-DA: a ring of the bin, drained into cd.vhd at 44.1 kHz.
 //
-// `docs/CD-PLAN.md` P4. The drive model answers SAPSP and SAPEP and knows
+// `docs/CD-PLAN.md at 62bc1ee` P4. The drive model answers SAPSP and SAPEP and knows
 // where the audio lives; this is the part that actually moves the bytes.
 //
 // ---- why it paces itself ----

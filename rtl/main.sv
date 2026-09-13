@@ -137,7 +137,7 @@ module pce (
     output wire [15:0] audio_r,
 
     // PC Engine CD. The drive model lives in core_top, on the bridge side,
-    // because that is where the transport that feeds it is. docs/CD-PLAN.md P3.
+    // because that is where the transport that feeds it is. docs/CD-PLAN.md at 62bc1ee P3.
     input  wire        cd_enable,
     input  wire [ 7:0] cd_stat_in,
     input  wire [ 7:0] cd_msg_in,
@@ -250,7 +250,7 @@ module pce (
       .CD_EN(cd_en),
       // Arcade card. Left off deliberately: it prunes cleanly and completely
       // because pce_top ANDs it with CD_EN, and it would cost 2MB of SDRAM and
-      // a 32-bit barrel shifter for four games. See docs/CD-PLAN.md 5e.
+      // a 32-bit barrel shifter for four games. See docs/CD-PLAN.md at 62bc1ee 5e.
       .AC_EN(0),
 
       // Super System Card RAM and, if AC_EN were ever 1, Arcade Card RAM. The

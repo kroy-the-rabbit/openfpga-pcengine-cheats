@@ -63,7 +63,7 @@ module cheat_osd #(
     // Replace the header line with the read probe's result. A diagnostic, off
     // in a shipping build, where Quartus folds the whole branch and its inputs
     // away. Same arrangement as DEBUG_WIPE in cheat_poker: the RTL stays,
-    // parameterised off, costing nothing. See docs/CD-PLAN.md P0.
+    // parameterised off, costing nothing. See docs/CD-PLAN.md at 62bc1ee P0.
     parameter DIAG = 0,
 
     // Draw every cell at double size. A 5 pixel wide glyph in a 6 pixel cell
@@ -77,7 +77,7 @@ module cheat_osd #(
     // pixels is 156 pixels, which fits the 256 pixel mode with room to spare.
     //
     // Costs the cheat list every line it has, so this is a troubleshooting
-    // mode and never a shipping one. See docs/CD-PLAN.md 5n.
+    // mode and never a shipping one. See docs/CD-PLAN.md at 62bc1ee 5n.
     parameter DIAG_SCALE = 1
 ) (
     input  wire        clk,          // clk_sys_42_95, the video clock here

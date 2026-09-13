@@ -2,7 +2,7 @@
 //
 // Parses a CD cue sheet into a track table.
 //
-// `docs/CD-PLAN.md` P2. Built the way `cheat_loader.sv` was, and for the same
+// `docs/CD-PLAN.md at 62bc1ee` P2. Built the way `cheat_loader.sv` was, and for the same
 // reason: a text file arrives byte by byte through a data slot and has to
 // become a structure the rest of the core can index. The techniques are that
 // module's, down to the whole-length keyword match.
@@ -96,7 +96,7 @@ module cd_toc #(
   // Three memories, each with one writer and one reader. Deliberately not one
   // wide array: a memory with more than one writer is a memory Quartus may
   // decline to infer, and it does not warn when it builds flip-flops instead.
-  // See docs/CD-PLAN.md, the inference trap in P1.
+  // See docs/CD-PLAN.md at 62bc1ee, the inference trap in P1.
   reg [31:0] lba_mem [0:MAX_TRACKS-1];
   reg [31:0] base_mem[0:MAX_TRACKS-1];
   reg [12:0] att_mem [0:MAX_TRACKS-1];   // {audio, sector size}
@@ -232,7 +232,7 @@ module cd_toc #(
   // The first version computed all of this combinationally from the incoming
   // byte: f_next, then MSF to LBA through two multiplies, then a 32 bit
   // subtract, then a 32 by 12 multiply, then an add, then a mux, and only then
-  // a register. That is `docs/PLAN.md` section 5 exactly, a long chain hung off
+  // a register. That is `docs/PLAN.md at 62bc1ee` section 5 exactly, a long chain hung off
   // late-arriving data, and it cost 5.4 ns: clk_sys_42_95 fell from 42.97 MHz
   // to an Fmax of 35.99 MHz and the build was refused.
   //

@@ -391,7 +391,7 @@ module core_top (
         32'h408: begin
           show_cheats <= bridge_wr_data[0];
         end
-        // CD read probe, docs/CD-PLAN.md P0
+        // CD read probe, docs/CD-PLAN.md at 62bc1ee P0
         32'h40C: begin
           probe_start <= bridge_wr_data[0];
         end
@@ -467,7 +467,7 @@ module core_top (
   //
   // Note that dataslot_path is NOT inside this: opening the bin the cue names
   // is how a disc is read, not a diagnostic, and it runs from the cue being
-  // parsed. See docs/CD-PLAN.md 5g.
+  // parsed. See docs/CD-PLAN.md at 62bc1ee 5g.
   localparam CD_PROBE = 0;
 
   // Whether the drive model's six rows are drawn. This is NOT the same switch:
@@ -492,7 +492,7 @@ module core_top (
   // 256 pixels wide and a 5 pixel glyph does not survive that; an afternoon
   // went on misreading 10C1 for 10E1 and 7 for 8, each one a build and a
   // hardware run. It costs the cheat list every line, so it is a
-  // troubleshooting mode and never ships. See docs/CD-PLAN.md 5n.
+  // troubleshooting mode and never ships. See docs/CD-PLAN.md at 62bc1ee 5n.
   localparam CD_DIAG_SCALE = 1;
 
   wire         probe_req, path_req;
@@ -961,7 +961,7 @@ module core_top (
   );
 
   // ------------------------------------------------------------------
-  // The drive. docs/CD-PLAN.md P3.
+  // The drive. docs/CD-PLAN.md at 62bc1ee P3.
   //
   // cd_host runs on clk_sys_42_95 because that is cd.vhd's clock, and cd_fetch
   // straddles the two domains: the transport it uses lives on clk_74a with the
@@ -999,7 +999,7 @@ module core_top (
   // A cue with tracks in it is a disc. cd_en is a per-load mode bit rather
   // than a setting: K[7] of the joypad port is `not CD_EN`, the CD-unit
   // presence flag, so leaving it set for a HuCard makes a game that checks it
-  // take the CD path and find nothing. See docs/CD-PLAN.md 5e.
+  // take the CD path and find nothing. See docs/CD-PLAN.md at 62bc1ee 5e.
   assign cue_loaded = (toc_track_count != 7'd0);
   wire   cd_enable  = cue_loaded;
 
@@ -1232,7 +1232,7 @@ module core_top (
   );
 
   // ------------------------------------------------------------------
-  // The cue sheet, parsed into a track table. docs/CD-PLAN.md P2.
+  // The cue sheet, parsed into a track table. docs/CD-PLAN.md at 62bc1ee P2.
   //
   // Slot 100 is preloaded rather than deferload: deferload is right for the
   // 489MB bin, which cannot fit anywhere, and wrong for a 975 byte cue, whose
@@ -1386,7 +1386,7 @@ module core_top (
   // The menu switch that runs the SD read probe. Held rather than pulsed: the
   // probe edge-detects it, and clearing it releases the result. probe_chunk
   // picks the request size, so one build sweeps all three. See CD_PROBE and
-  // docs/CD-PLAN.md P0.
+  // docs/CD-PLAN.md at 62bc1ee P0.
   reg probe_start = 0;
   reg [1:0] probe_chunk = 0;
   reg path_start = 0;

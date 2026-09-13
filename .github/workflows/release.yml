@@ -3,15 +3,11 @@ name: Release
 # A release is a tag on main, and the package it names was built somewhere
 # this workflow is not.
 #
-# Quartus runs only on the controlled builders, sisko and kira, through the
-# orchestrator's tools/runner-build, against a Quartus image that is private
-# and stays so: Quartus Lite needs no licence, but that grants no right to
-# redistribute its installed files, so the image is never uploaded to Actions
-# or a registry. The behaviour the old hosted build carried lives on there,
-# because it lives in the harness rather than in this file: STANDARD FIT and
-# STRICT_TIMING through build.sh, report.sh exiting 3 on negative slack, and a
-# seed retry on a timing miss. A package that ships was fit to flash where it
-# was built.
+# No Quartus runs on GitHub. Packages are built on controlled builders from a
+# private Quartus image that is never uploaded to Actions or a registry.
+# STANDARD FIT, STRICT_TIMING and report.sh exiting 3 on negative slack live
+# in the harness, not in this file. A package that ships was fit to flash
+# where it was built.
 #
 # What CI does on a tag is check that the release the orchestrator published
 # is the one the tag names: the package is present, its checksums verify, and

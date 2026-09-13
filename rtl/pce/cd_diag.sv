@@ -2,7 +2,7 @@
 //
 // The diagnostic block, as a small RAM instead of a very wide crossing.
 //
-// `docs/CD-PLAN.md` P4. The overlay draws six rows of 26 characters and reads
+// `docs/CD-PLAN.md at 62bc1ee` P4. The overlay draws six rows of 26 characters and reads
 // them one character at a time, and for one build those 936 bits were carried
 // into the video clock as a bus: a 937 bit `synch_3`, 2811 registers, dragged
 // from one corner of the die to another so that six lines of debug text could

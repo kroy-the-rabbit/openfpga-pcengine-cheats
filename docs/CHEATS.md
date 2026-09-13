@@ -40,8 +40,8 @@ what lets Quartus infer 8 M10Ks for it rather than 32 when `SGX_EN = 0`.
 `cheat_poker` holds its codes in a small `{live, addr[12:0], data[7:0]}` memory
 rather than a register file, so a fresh index costs one cycle before the entry
 is readable. That is the `SETTLE` state. It also keeps the per-code lookup off
-any data path, which is the half of the GB/GBC timing lesson in `PLAN.md` §5
-that still applies here now that the read override is cut.
+any data path, the half of the GB/GBC timing lesson that still applies here
+now that the read override is cut.
 
 `code_count` is the authority on how far a scan runs, so loading a new file
 needs no clearing walk over the table.
@@ -173,7 +173,7 @@ restores whatever was set last, so a box ticked once during testing comes back
 ticked on the next build and the core looks like it defaults cheats on.
 
 `Show cheats` draws the list. `cheat_osd`, `cheat_font` and `cheat_titles` are
-ported and wired in `core_top.v`. The §6 problem they were blocked on, that the
+ported and wired in `core_top.v`. The problem they were blocked on, that the
 overlay was parameterised for a fixed 160x144 Game Boy raster while the PC
 Engine has no fixed resolution, is resolved: the panel is clocked at
 `clk_mem_85_91`, where `color_mix` registers the picture, and it is inset from

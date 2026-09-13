@@ -2,7 +2,7 @@
 //
 // Pulls one 2048 byte sector off the SD card and hands it to the drive model.
 //
-// `docs/CD-PLAN.md` P3. This is the join between the two halves of the CD
+// `docs/CD-PLAN.md at 62bc1ee` P3. This is the join between the two halves of the CD
 // work: the transport proved in P0 and P1 lives on `clk_74a` with the bridge,
 // and `cd_host` lives on `clk_sys_42_95` with the rest of the core, because
 // that is the clock `cd.vhd` runs on.

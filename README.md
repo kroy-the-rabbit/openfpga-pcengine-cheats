@@ -1,7 +1,7 @@
 # PC Engine / TurboGrafx-16 for Analogue Pocket, with cheats
 
-A Pocket core for the PC Engine and TurboGrafx-16 that can apply cheat codes to
-a running game.
+A Pocket core for the PC Engine and TurboGrafx-16 that applies cheat codes to a
+running game, and runs PC Engine CD discs from the SD card.
 
 **Based on [agg23/openfpga-pcengine](https://github.com/agg23/openfpga-pcengine)
 by agg23**, whose master this forks at the point it had merged
@@ -10,254 +10,95 @@ Pocket port of
 [TurboGrafx16_MiSTer](https://github.com/MiSTer-devel/TurboGrafx16_MiSTer) by
 srg320 and greyrogue, which is in turn built on
 [FPGAPCE](https://github.com/Torlus/FPGAPCE) by Gregory Estrade. Everything that
-ships here is theirs apart from the cheat engine.
+ships here is theirs apart from the cheat engine and the CD host side.
 
-What this fork adds is the cheat engine and, on top of upstream's dormant CD
-RTL, the host side that CD block has always needed. All of it is built by
-`rtl/pce.qip` and `target/pocket/core.qip`, plus the port `cheat_poker` borrows
-in `pce_top.vhd`, data slots to load codes and discs through and a few menu
-switches. It also turns SuperGrafx off, which is the price of the room they
-need.
-
-| | |
-|---|---|
-| `cheat_poker.sv` | writes the codes into work RAM once a frame |
-| `cheat_loader.sv` | parses a libretro `.cht` into code entries |
-| `cheat_osd.sv` | draws the enabled cheats over the picture |
-| `cheat_titles.sv` | holds their names for the overlay |
-| `cheat_font.sv` | the glyphs |
-| `cd_toc.sv` | parses a cue sheet into a track table |
-| `cd_host.sv` | the CD drive, reimplemented from srg320's `pcecdd.cpp` |
-| `cd_fetch.sv` | pulls sectors off the SD card through the APF bridge |
-| `cd_audio.sv` | streams CD-DA out of a ring of the bin at 44.1 kHz |
-| `cd_diag.sv` | the diagnostic overlay block, as a character RAM |
-| `dataslot_path.sv` | opens the bin a cue names, next to the cue |
-| `dataslot_probe.sv` | measures the transport, a diagnostic |
-
-`main.sv` and `target/pocket/core_top.v` are modified to wire them in. See
-[docs/CHEATS.md](docs/CHEATS.md).
-
-> **Cheats can corrupt save files.** A PC Engine cheat is a write into the work
-> RAM of a running game, made once a frame, and a game builds its save data out
-> of that same memory. A code aimed at an address that means something else in
-> your copy overwrites whatever is there, and the damage is written into your
-> save the next time the game saves. Back up anything you care about first.
-
-## SuperGrafx is the price of the cheat engine
-
-`SGX_EN` is 0, which frees the second VDC, its VRAM and the VPC. That is the
-room the cheat engine is built out of, and it is why the design sits near 50 %
-logic and block RAM with the engine in it rather than against the ceiling.
-`docs/BASELINE.md` has the measurements.
-
-A SuperGrafx game will not run correctly on a core that no longer has the
-hardware. `.sgx` still appears in the loader, because the cartridge slot doubles
-as the System Card slot and the manifest lists both extensions, but a SuperGrafx
-game loaded here renders as a plain PC Engine and will not look right. If you
-want SuperGrafx, run agg23's core: the two install side by side and this one
-does not replace it.
-
-## PC Engine CD
-
-**Castlevania: Rondo of Blood boots from cue plus bin, plays both opening
-cinematics with music, completes stage 0, starts stage 1, and reloads its
-cue-named save**, verified on hardware. `docs/CD-PLAN.md` records the build and
-hardware evidence behind that result.
-
-The CD RTL is inherited, `rtl/pce/cd/`: `cd.vhd`, `SCSI.vhd`, `SCSI_FIFO.vhd`,
-`CDDA_FIFO.vhd` and `MSM5205.vhd`. It is live now: `pce_top.vhd` passes
-`EN => CD_EN` and `main.sv` drives `cd_en` from whether a cue has parsed, so a
-HuCard still runs with the CD unit absent.
-
-What made it a project rather than a switch is that MiSTer's CD block expects a
-host processor running Linux to parse the cue sheet, seek the image and feed it
-sectors, and the Pocket has none. The drive itself lives on that host, about
-900 lines of it, and all of it had to move into the FPGA.
-
-Working, each verified on hardware:
-
-* **The transport.** APF target command `0x0180` reads a range of a data slot
-  into the core. Measured at **1104 KB/s** with 8KB requests, 6.3 times what
-  Redbook audio needs on its own. Reads are rounded to 512 byte boundaries.
-* **The file layer.** `0x0190` says where the file the user picked lives and
-  `0x0192` opens another next to it, so the core can be handed a cue and open
-  the bin the cue names. The Pocket's file browser cannot do this by itself.
-* **The cue parser.** `rtl/pce/cd_toc.sv`, streaming, no host. Track numbers,
-  types, sector sizes and the byte offset of every track in the bin.
-* **The drive model.** `rtl/pce/cd_host.sv`, nine SCSI opcodes, phase ordering
-  and status timing as `cd.vhd` demands them. **This is a reimplementation of
-  srg320's `pcecdd.cpp`**, the host-side drive model from TurboGrafx16_MiSTer,
-  not original work: the opcode set, the sense codes, the track clamping and
-  the decision to give seeks zero latency are all its design, moved into RTL.
-  No code was copied.
-
-There is already a working PC Engine CD core for the Pocket,
-[Mazamars312's](https://github.com/Mazamars312/openfpga-pcengine-cd/), and it
-solves the same problem the other way: it puts a soft CPU in the fabric and
-loads it a 24KB firmware, `pce_mpu_bios.bin`, which runs the drive in software
-much as `pcecdd.cpp` runs on MiSTer's Linux host. This fork does it in RTL
-instead, because the point of the fork is the cheat engine and the two want the
-same room. Their manifest is prior art this leaned on: the cue plus bin data
-slot layout here, slot IDs included, was checked against theirs, and so was the
-`version_required` floor. See `docs/CD-PLAN.md`.
-
-* **CD-DA streaming.** `rtl/pce/cd_audio.sv`, a 16KB ring of the bin drained
-  into the CD block at 44.1 kHz, paced against the same accumulator constants
-  the core's own sample clock uses. ADPCM needed nothing: its RAM and its DMA
-  live inside `cd.vhd` and feed off the SCSI data phase.
-
-The hardware target is Rondo from a single-bin cue. Multi-bin sets and games
-that exercise the remaining SCSI edge cases are not yet compatibility claims.
-See `docs/CD-HANDOFF.md`.
-
-Discs must be **cue plus bin**. A bare `.iso` is the data track only, so a game
-boots and plays silent, and `.chd` is compressed in a way that cannot be
-seek-addressed at all: convert with `chdman extractcd` first.
-
-**Put a System Card in `Assets/pce/common/`.** Slot 0 takes a HuCard or a
-System Card, because on real hardware the System Card is a HuCard, and it
-defaults to `bios_3_0_usa.pce` with `bios_3_0_jap.pce` and the 2.0 and 1.0
-cards as fallbacks. Pick a `.pce` and it loads that; pick a `.cue` and slot 0
-falls back to the default, so a disc needs no second trip through the file
-browser. Rondo wants a 3.0 card.
-
-This work is why `core.json` now asks for APF `version_required 2.3` rather
-than `1.1`. **A Pocket on older firmware will not load this core.**
+> **Cheats can corrupt save files.** A cheat writes into the work RAM of a
+> running game once a frame, and a game builds its save data out of that same
+> memory. Back up anything you care about first.
 
 ## What works
 
 | | |
 |---|---|
 | Cheats, RAM pokes from libretro `.cht` files | **works** |
-| **Cheats Enabled** switch, live | **works** |
+| **Cheats enabled** switch, live | **works** |
+| **Show cheats**, the names of the enabled cheats over the picture | **works** |
+| PC Engine CD, cue plus bin | **works** on Rondo of Blood, the only disc tested. See [docs/CD.md](docs/CD.md) |
 | Everything upstream's core does, apart from SuperGrafx | **works** |
-| Four players through the Analogue Dock | **works**, upstream's |
-| Six-button controllers | **works**, upstream's |
-| Controller turbo | **works**, upstream's |
-| Per-game memory cards | **works**, upstream's |
-| SuperGrafx | **off.** It paid for the cheat engine and it is paying for CD as well. See above |
-| PC Engine CD | **works for the hardware target.** Rondo completes stage 0, starts stage 1, reloads its cue-named save, and takes cheats from a `.cht` beside its cue. One disc has been tested. See above |
+| Four players through the Analogue Dock, six-button controllers, turbo, per-game memory cards | **works**, upstream's |
+| SuperGrafx | **off**, to make room for the cheat engine and CD |
 | Cartridges | not supported |
-| **Show cheats**, the on-screen list of enabled cheats | **works** |
-| A code store meter | not built. The store holds 32 codes, `MAX_CODES` in `cheat_poker.sv` and `cheat_loader.sv`, and the loader stops committing at it, but nothing shows how full it is |
 
-## Versions
-
-Every project in this set sits at **0.9999** and none of them moves off it.
-1.0 is a claim to be finished, none of this is finished, and a version that
-never climbs cannot drift into making that claim by accident.
-
-The projects are not kept in step with each other. A release adds the short
-SHA of the commit it was cut from, so a tag reads `v0.9999.d5d93c8`, and two
-tags that share the prefix are unrelated releases. Read the tail, not the
-number.
-
-Provenance is stated in words, above and in the credits, rather than implied by
-a number.
+The code store holds 32 codes.
 
 ## Installation
 
-Prebuilt cores are on the [Releases](../../releases) page. Download
-`kroy.PCE_<version>.zip`, not the "Source code" archives: the bitstream is not
-committed, so a core installed from a source archive is listed by the Pocket
-and cannot start.
+Needs Pocket firmware with APF 2.3.
 
-This core installs as `Cores/kroy.PCE` and shows as "PC Engine / TurboGrafx-16
-(cheats)". It does not replace an upstream `agg23.PC Engine` install, it sits
-beside it. APF names a core folder after the author in its `core.json`, and this
-one says `kroy` because it is not agg23's build. Delete the old folder if you do
-not want both listed, and its `/Settings/agg23.*` folder with it. Saves are
-keyed by platform rather than by core, so they carry over untouched; save states
-and settings do not.
+1. Download `kroy.PCE_<version>.zip` from [Releases](../../releases), not the
+   "Source code" archive. The bitstream is not committed.
+2. Merge its `Assets`, `Cores` and `Platforms` into the SD card root. On macOS,
+   copy the folders inside those three: Finder replaces folders instead of
+   merging them and would delete your ROMs.
 
-Copy the `Assets`, `Cores` and `Platforms` folders to the root of the SD card.
-Finder on macOS *replaces* folders rather than merging them the way Windows
-does, which will delete the ROMs already in `Assets`, so copy the folders inside
-those three rather than dragging the three themselves.
-
-There is no boot ROM to find. This core needs none.
+It installs as `Cores/kroy.PCE`, beside any `agg23.PC Engine` install rather
+than replacing it. Saves carry over; save states and settings do not.
 
 ## Usage
 
-ROMs go in `/Assets/pce/common/`.
+- HuCard ROMs and System Cards go in `Assets/pce/common/`.
+- A cheat file goes beside the ROM, named after it: `YourGame.pce.cht`. Load it
+  from the **Cheats** slot.
+- **Cheats enabled** turns every loaded cheat on and off. **Show cheats** draws
+  their names. Both are off at every launch and never remembered.
+- Discs: [docs/CD.md](docs/CD.md).
 
-Cheat files go beside the ROM, named after it: `YourGame.pce.cht`. The
-[desktop app](#the-desktop-app) writes them for you, or you can write one by
-hand in the libretro format.
+Upstream's options are unchanged: **Use Turbo Tap**, **Use 6 Button Ctrl**
+(breaks games that do not support it), turbo for I and II on X and Y,
+**Extra Sprites**, **Raw RGB Color**, **Master Audio Boost** and
+**PCM Audio Boost**. **CD Audio Boost** is this fork's. Some games show black
+bars; the aspect ratio is correct.
 
-**Cheats enabled** in the core menu turns the whole lot on and off. **Show
-cheats** draws the names of the enabled cheats over the picture. Both are off at
-every launch and neither is remembered, which matches the Game Boy cores.
-
-The overlay is drawn in the core's own pixel space, ahead of the linebuffer. It
-is inset from the corner rather than starting at pixel 0, because on the PC
-Engine the active region is not the visible region: drawn from the corner the
-leftmost cells sat in overscan and fell off the side of the panel, taking the
-header's count digits and the first letter of every title with them. The inset
-costs no text and nothing at pixel rate, and the panel fits inside the narrowest
-mode this core produces.
-
-[docs/CHEATS.md](docs/CHEATS.md) has the detail.
-
-### Video, audio and controllers
-
-Upstream's options, unchanged:
-
-* **Use Turbo Tap** enables four players through the Dock.
-* **Use 6 Button Ctrl** in Core Settings enables six-button controllers. It can
-  break games that do not support them, so turn it off when you are not using
-  one.
-* **Turbo modes** for the `I` and `II` buttons, fired with `X` and `Y`. The
-  original controllers put turbo on `I` and `II` directly; the Pocket has
-  buttons to spare, so they get their own.
-* **Extra Sprites** allows more sprites per line and reduces flickering in some
-  games. **Raw RGB Color** uses the HUC6260's raw palette rather than the
-  composite one.
-* **Master Audio Boost** and **PCM Audio Boost** for games that are too quiet,
-  and **CD Audio Boost** for the CD-DA track on a disc, which is this fork's.
-
-The PC Engine picks its own resolution at will and the Pocket cannot. Upstream
-covers the common ones, so expect black bars on some games; the aspect ratio is
-correct either way.
-
-Each game gets its own memory card rather than sharing one, and each new save
-file is pre-initialised, because some games cannot format a card themselves.
-
-## The desktop app
-
-[pocket-tools](https://github.com/kroy-the-rabbit/pocket-tools) is the desktop
-side of this set. It reads your Pocket SD card, lists the games on it, matches
-each against the libretro cheat database and writes the cheat file beside the
-ROM. It will also install and update this core for you.
-
-You do not need it. A cheat file written by hand works exactly the same. It
-exists because picking cheats out of 397 database files by hand is tedious.
+[pocket-tools](https://github.com/kroy-the-rabbit/pocket-tools) reads the SD
+card, matches games against the libretro cheat database, writes cheat files
+and installs this core. It is optional.
 
 ## Documentation
 
 | | |
 |---|---|
-| [docs/CHEATS.md](docs/CHEATS.md) | what a PC Engine cheat is, how the poke reaches memory, the menu readout |
-| [docs/PLAN.md](docs/PLAN.md) | design and phasing |
-| [docs/BASELINE.md](docs/BASELINE.md) | measured area and timing, build by build |
+| [docs/CHEATS.md](docs/CHEATS.md) | what a PC Engine cheat is, how a poke reaches memory, the menu, wiring |
+| [docs/CD.md](docs/CD.md) | discs: format, System Card, saves, how the drive works |
+| [docs/BASELINE.md](docs/BASELINE.md) | measured area and timing |
+| [tools/podman/README.md](tools/podman/README.md) | the build harness |
 
-## Building from source
+## Versions
 
-Quartus runs in a container and nothing is installed on the host:
+Every project in this set sits at **0.9999**. A release adds the short SHA of
+the commit it was cut from, so a tag reads `v0.9999.d5d93c8`. The projects are
+not kept in step.
+
+## Building
+
+Releases are built from the tagged commit on a controlled builder with Quartus
+Prime Lite 25.1std. No Quartus runs on GitHub; the release workflow only checks
+the published package.
 
 ```sh
-make pce      # -> build/pce/{pce.rev, sd/, kroy.PCE_<version>.zip, report.txt}
-make test     # the simulation suite
+make pce      # -> build/pce/{report.txt, build.log, work/}
+make dist     # -> build/pce/dist/ and a zip for the SD card root
+make test     # manifest checks and the .cht parser fixtures
 ```
 
-The build fails if the design misses timing. Quartus exits 0 on negative slack,
-so the harness checks worst-case slack itself and stops, because a bitstream
-with negative slack may work on one bench and fail on somebody's handheld.
+`tools/sim/run_osd.py` renders the cheat overlay and reads it back; it needs
+Icarus Verilog and is not part of `make test`.
+
+Quartus exits 0 on a design that misses timing, so `report.sh` is the gate.
 
 ## Where to report a problem
 
-Cheat engine bugs belong here. Bugs in the core itself are most likely the
-Pocket port's rather than MiSTer's, so they belong
+Cheat engine and CD host bugs belong here. Bugs in the core itself are most
+likely the Pocket port's rather than MiSTer's, so they belong
 [upstream](https://github.com/agg23/openfpga-pcengine/issues) and will be
 forwarded from here as necessary.
 
