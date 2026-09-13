@@ -12,18 +12,18 @@ was exercised. Repeatability across cold launches is not established yet.
 **Rondo is the release target and current hardware evidence.** The user may
 test additional cue files later as optional follow-up coverage.
 
-**p24 is the current release candidate.** It removes the CD diagnostics that
-p23 mistakenly left under `Show cheats`. Hardware presentation remains.
+**p24 shipped as `v0.9999.d5d93c8`.** It removes the CD diagnostics that
+p23 mistakenly left under `Show cheats`, and passed on hardware 2026-09-04.
 
 | | |
 |---|---|
 | branch | `cd-streaming`, p24 release fix `d5d93c8`; p21 functional source `b86a38b` |
-| working tree | this handoff update is uncommitted; p24 artifacts and hardware evidence are ignored under `build/` |
+| working tree | this handoff is committed; p24 artifacts and hardware evidence are ignored under `build/` |
 | on the card | p24 installed and hash-verified. Hardware pass reported by Kroy 2026-09-04: `Show cheats` clean, menu order confirmed, HuCard save regression and CD cheat test passed, Rondo repeated |
 | build | p24 on Kira, 1218 seconds, 13,026 ALMs, all timing passed |
 | card save | cue-named Rondo save reloads at 4 percent; root `.sav` remains absent |
 | card state | mounted `rw` at `/run/media/kroy/pocket`; leave mounted |
-| worktree | `worktrees/p5` on `cd-adpcm`, nothing committed |
+| worktree | `worktrees/p5` on `cd-adpcm`, holding uncommitted CD audio RTL in `cd_audio.sv`, `cd_host.sv` and `core_top.v` |
 
 p19 and p20 screenshots plus the candidate CD saves are copied off the
 removable card under ignored `build/evidence/`. p21 was built, timing-clean,
@@ -215,7 +215,7 @@ hash before removing any exact captured file from the card.
 
 ## Release alignment
 
-The current built candidate is p24 from exact commit
+The release, `v0.9999.d5d93c8`, is p24 from exact commit
 `d5d93c85f80f8be3418a34e7348b330ecd1ba24a`. Kira built it with Quartus Lite
 25.1std build 1129 in 1218 seconds. It uses 13,026 of 18,480 ALMs and passed
 all timing analyses: setup `+2.193 ns`, hold `+0.098 ns`, recovery
@@ -248,9 +248,8 @@ matched the p24 package values above. Always verify content hashes after a card
 copy. The card remains mounted and must not be unmounted unless explicitly
 requested.
 
-p21 remains the last hardware-tested installation. It passed CD save creation,
-writeback, and reload at 4 percent. p24 retains that functional logic and is
-the candidate for the next hardware pass.
+p21 passed CD save creation, writeback, and reload at 4 percent. p24 retains
+that functional logic and passed the hardware checks below.
 
 Before tagging or packaging a release, all reported done by Kroy 2026-09-04
 against the installed p24:

@@ -251,18 +251,19 @@ module cheat_osd #(
   reg [5:0] fill = 0;              // 0..COLS+2, past the end to drain
   reg       filling = 0;
 
-  // Three stages, because the address is registered here and again inside
-  // cheat_titles before its data comes back. The header takes the same three
-  // so both halves of a line agree on which column they are drawing.
-  reg [4:0] fill_col_d1 = 0, fill_col_d2 = 0, fill_col_d3 = 0;
-  reg       fill_hdr_d1 = 0, fill_hdr_d2 = 0, fill_hdr_d3 = 0;
-  reg       fill_pre_d1 = 0, fill_pre_d2 = 0, fill_pre_d3 = 0;
-  reg [4:0] fill_src_d1 = 0, fill_src_d2 = 0, fill_src_d3 = 0;
+  // Two stages: address, then write. cheat_titles registers its read once, so
+  // its answer for the column asked at the address stage is valid in step with
+  // the _d2 signals. The header takes the same two so both halves of a line
+  // agree on which column they are drawing.
+  reg [4:0] fill_col_d1 = 0, fill_col_d2 = 0;
+  reg       fill_hdr_d1 = 0, fill_hdr_d2 = 0;
+  reg       fill_pre_d1 = 0, fill_pre_d2 = 0;
+  reg [4:0] fill_src_d1 = 0, fill_src_d2 = 0;
 
   // Which character of the title this cell shows. The first COL0 cells have
   // none, and are blanked by fill_pre rather than by reading somewhere safe.
   wire [4:0] src_col = (fill >= COL0[5:0]) ? (fill[4:0] - COL0[4:0]) : 5'd0;
-  reg [5:0] hdr_char_d1 = 0, hdr_char_d2 = 0, hdr_char_d3 = 0;
+  reg [5:0] hdr_char_d1 = 0, hdr_char_d2 = 0;
 
   // The first ROW0 rows are left blank, which is the vertical half of the inset.
   wire       above     = (text_row < ROW0E[4:0]);
@@ -323,27 +324,20 @@ module cheat_osd #(
     hdr_char_d1 <= header_char(hdr_row, src_col);
 
 
-    // Data stage: the RAM is answering.
+    // Write stage: the RAM is answering, so font_bits is this column's glyph row.
     fill_col_d2 <= fill_col_d1;
     fill_hdr_d2 <= fill_hdr_d1;
     fill_pre_d2 <= fill_pre_d1;
     fill_src_d2 <= fill_src_d1;
     hdr_char_d2 <= hdr_stage1;
-    fill_col_d3 <= fill_col_d2;
-    fill_hdr_d3 <= fill_hdr_d2;
-    fill_pre_d3 <= fill_pre_d2;
-    fill_src_d3 <= fill_src_d2;
-    hdr_char_d3 <= hdr_char_d2;
-
-    // Write stage: the glyph row is out.
-    if (filling && fill >= 6'd3 && fill_col_d3 < COLS[4:0])
-      line_bits[fill_col_d3] <= (row_used && !fill_pre_d3) ? font_bits : 8'd0;
+    if (filling && fill >= 6'd2 && fill_col_d2 < COLS[4:0])
+      line_bits[fill_col_d2] <= (row_used && !fill_pre_d2) ? font_bits : 8'd0;
   end
 
-  // The title RAM answers two cycles after being asked, so the header is
-  // delayed by the same two or the halves of a line disagree about the column.
-  wire beyond = !fill_hdr_d3 && (fill_src_d3 >= title_len);
-  assign font_ch  = fill_hdr_d3 ? hdr_char_d3 : (beyond ? SP : title_char);
+  // The title RAM answers one cycle after being asked, so the header is
+  // delayed by the same one or the halves of a line disagree about the column.
+  wire beyond = !fill_hdr_d2 && (fill_src_d2 >= title_len);
+  assign font_ch  = fill_hdr_d2 ? hdr_char_d2 : (beyond ? SP : title_char);
   assign font_row = glyph_row;
 
   // ------------------------------------------------------------- output ----

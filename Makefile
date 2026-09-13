@@ -22,6 +22,7 @@
 #
 #   tools/cheats/check-manifests.sh   APF limits the Pocket enforces silently
 #   tools/cheats/run-fixtures.sh      .cht parser against known cases
+#   tools/sim/run_osd.py              cheat overlay, rendered and read back (Icarus)
 
 PODMAN  ?= podman
 # Repeatable timing closure. AUTO FIT, which the qsf asks for, lowers effort as

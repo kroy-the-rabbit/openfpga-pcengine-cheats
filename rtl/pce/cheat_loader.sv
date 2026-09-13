@@ -126,6 +126,7 @@ module cheat_loader #(
   reg [7:0]  dec_val  = 0;
 
   reg        in_quote = 0;
+  reg [4:0]  desc_n   = 0;   // characters of this name so far
   reg [23:0] hex_addr = 0;
   reg [7:0]  hex_val  = 0;
   reg        in_val   = 0;   // past the ':' of addr:val
@@ -221,6 +222,7 @@ module cheat_loader #(
       in_val        <= 1'b0;
       any_hex       <= 1'b0;
       in_quote      <= 1'b0;
+      desc_n        <= 0;
       desc_group    <= 0;
       desc_col      <= 0;
       desc_char     <= 0;
@@ -346,19 +348,23 @@ module cheat_loader #(
             if (data == 8'h22) begin
               if (in_quote) begin
                 in_quote <= 1'b0;
-                desc_end <= 1'b1;     // desc_col is now the length
+                desc_end <= 1'b1;
+                desc_col <= desc_n;   // the length
               end else begin
                 in_quote <= 1'b1;
-                desc_col <= 5'd0;
+                desc_n   <= 5'd0;
               end
-            end else if (in_quote && desc_col < 5'd26) begin
+            end else if (in_quote && desc_n < 5'd26) begin
+              // desc_col is this character's column, on the same clock as
+              // the strobe; the running count is kept apart from it.
               desc_wr    <= 1'b1;
               desc_group <= title_count[4:0];
               // ASCII - 32, with a-z folded to A-Z on the way past. The font
               // holds 64 glyphs, so anything above 0x5F wraps into it; that is
               // the truncation, and it is deliberate.
               desc_char  <= desc_fold[5:0];
-              desc_col   <= desc_col + 5'd1;
+              desc_col   <= desc_n;
+              desc_n     <= desc_n + 5'd1;
             end
 
             F_ADDR:

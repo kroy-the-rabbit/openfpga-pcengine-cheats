@@ -4,7 +4,7 @@ Scope: cheats for ROMs loaded from the SD card. Physical HuCards through
 Analogue's TurboGrafx-16 adapter are explicitly **out of scope** (§7). An
 on-screen cheat list is a **nice to have**, not a requirement (§6).
 
-The sibling project `~/Desktop/repos/pocket-gbc` has already shipped this
+The sibling project `~/Desktop/repos/pocket-dev/pocket-gbc` has already shipped this
 feature end to end, overlay included, and its `docs/PLAN.md` records what went
 wrong on the way. Most of this plan is "port that, adjusted for the PCE", and
 the sections below try to be specific about which parts do not carry over.
@@ -121,7 +121,7 @@ is exactly what happened on GBC.
 
 ## 3. The port, module by module
 
-All six files come from `~/Desktop/repos/pocket-gbc/src/gb/`.
+All six files come from `~/Desktop/repos/pocket-dev/pocket-gbc/src/gb/`.
 
 | Module | Lines | Carries over? |
 |---|---:|---|
@@ -290,7 +290,7 @@ is the expensive half and it already exists there.
 ### 7b. Physical HuCards
 
 Analogue does ship a TurboGrafx-16 adapter, and openFPGA cores genuinely can
-read physical cartridges: `~/Desktop/repos/pocket-gbc` does exactly that, with
+read physical cartridges: `~/Desktop/repos/pocket-dev/pocket-gbc` does exactly that, with
 `"cartridge_adapter": "0x01000000"` in its `core.json` and the bus driven from
 `core_top.sv:1008-1026`.
 
