@@ -13,6 +13,8 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
+source "$HERE/version.sh"
+RELEASE_NAME=$(pocket_version "${RELEASE_NAME:-}")
 BDIR="$REPO/build/${BUILD_NAME:-pce}"
 WORK="$BDIR/work"
 

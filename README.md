@@ -74,9 +74,10 @@ and installs this core. It is optional.
 
 ## Versions
 
-Every project in this set sits at **0.9999**. A release adds the short SHA of
-the commit it was cut from, so a tag reads `v0.9999.d5d93c8`. The projects are
-not kept in step.
+Versions use `0.9999.YYYYMMDD`, where the date is UTC. Release tags add `v`,
+for example `v0.9999.20260913`. Each project releases independently.
+The source commit and bitstream checksums are recorded in build provenance.
+A published date is not reused for a different build.
 
 ## Building
 
@@ -142,6 +143,8 @@ supplied under Analogue's own software licence agreement and the Pocket EULA
 linked from their headers, which provide that where the MIT or GNU licences must
 apply, those prevail.
 
-Binary releases here are built from the exact tagged commit of this repository
-on a controlled builder, and the tag is the corresponding source for them. The
-release carries the zip, its SHA-256, and the timing report.
+Binary releases come from controlled builders. Each dated release includes
+`BUILD.json` with the original build commit and bitstream checksums. Its
+release tag may also include documentation and packaging changes; the FPGA
+source is unchanged from the recorded build. The package, checksums and
+timing report accompany that provenance.

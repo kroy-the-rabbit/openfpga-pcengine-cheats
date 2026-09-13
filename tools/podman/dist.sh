@@ -15,6 +15,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT/tools/podman/version.sh"
+VERSION=$(pocket_version "${RELEASE_NAME:-}")
 NAME="${BUILD_NAME:-pce}"
 REV="${REV:-pce_pocket}"
 
@@ -48,23 +50,13 @@ echo
 echo "   Copy the contents of $OUT onto the Pocket's SD card root."
 
 
-# A tagged build carries the tag as its version, so the Pocket shows what was
-# actually released rather than whatever the checked-in manifest last said.
-# Stamped into the packaged copy only; the repo manifest is left alone.
-VERSION="$(jq -r '.core.metadata.version' "$CORE_JSON")"
-if [ -n "${RELEASE_NAME:-}" ]; then
-  VERSION="${RELEASE_NAME#v}"
-  if [ "${#VERSION}" -gt 31 ]; then
-    echo "version too long for APF: $VERSION" >&2
-    exit 1
-  fi
-  tmp="$(mktemp)"
-  jq --indent 2 --arg v "$VERSION" --arg d "$(date -u +%Y-%m-%d)" \
-     '.core.metadata.version = $v | .core.metadata.date_release = $d' \
-     "$OUT/Cores/$CORE_DIR/core.json" > "$tmp"
-  mv "$tmp" "$OUT/Cores/$CORE_DIR/core.json"
-  echo "   stamped   version=$VERSION"
-fi
+# Stamp the package; the checked-in manifest remains a template.
+tmp="$(mktemp)"
+jq --indent 2 --arg v "$VERSION" --arg d "$(pocket_version_date "$VERSION")" \
+   '.core.metadata.version = $v | .core.metadata.date_release = $d' \
+   "$OUT/Cores/$CORE_DIR/core.json" > "$tmp"
+mv "$tmp" "$OUT/Cores/$CORE_DIR/core.json"
+echo "   stamped   version=$VERSION"
 
 # Release archive, laid out so it unzips straight onto the SD card root. Named
 # after the core and its version, matching the sibling forks.
