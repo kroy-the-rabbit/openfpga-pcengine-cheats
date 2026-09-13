@@ -16,9 +16,9 @@
 #   make compare A=pce B=vanfanel   resource and timing delta between two builds
 #   make clean                  remove build/
 #
-# CI runs the same build.sh with Quartus installed on the runner instead of in
-# the container, so a release build and a local one are the same build. See
-# .github/workflows/release.yml.
+# Release builds run this same build.sh on the build runners, through the
+# orchestrator's tools/runner-build. CI builds nothing: .github/workflows/release.yml
+# only verifies the published package.
 #
 #   tools/cheats/check-manifests.sh   APF limits the Pocket enforces silently
 #   tools/cheats/run-fixtures.sh      .cht parser against known cases

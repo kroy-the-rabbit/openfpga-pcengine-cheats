@@ -19,7 +19,7 @@ p23 mistakenly left under `Show cheats`, and passed on hardware 2026-09-04.
 |---|---|
 | branch | `cd-streaming`, p24 release fix `d5d93c8`; p21 functional source `b86a38b` |
 | working tree | this handoff is committed; p24 artifacts and hardware evidence are ignored under `build/` |
-| on the card | p24 installed and hash-verified. Hardware pass reported by Kroy 2026-09-04: `Show cheats` clean, menu order confirmed, HuCard save regression and CD cheat test passed, Rondo repeated |
+| on the card | `7d42867` (`titles2`, overlay title fix) installed and hash-verified; overlay names confirmed by Kroy 2026-09-12. Before it, p24 passed on hardware 2026-09-04: `Show cheats` clean, menu order confirmed, HuCard save regression and CD cheat test passed, Rondo repeated |
 | build | p24 on Kira, 1218 seconds, 13,026 ALMs, all timing passed |
 | card save | cue-named Rondo save reloads at 4 percent; root `.sav` remains absent |
 | card state | mounted `rw` at `/run/media/kroy/pocket`; leave mounted |

@@ -158,9 +158,9 @@ a number.
 ## Installation
 
 Prebuilt cores are on the [Releases](../../releases) page. Download
-`kroy.PCE_<version>.zip`, not the "Source code" archives: the bitstream is built
-by CI rather than committed, so a core installed from a source archive is listed
-by the Pocket and cannot start.
+`kroy.PCE_<version>.zip`, not the "Source code" archives: the bitstream is not
+committed, so a core installed from a source archive is listed by the Pocket
+and cannot start.
 
 This core installs as `Cores/kroy.PCE` and shows as "PC Engine / TurboGrafx-16
 (cheats)". It does not replace an upstream `agg23.PC Engine` install, it sits
